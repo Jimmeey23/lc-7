@@ -3,6 +3,7 @@ const { getConfig, LIFECYCLE_STATUSES } = require('./config');
 const { formatIST, formatRunTimestamp } = require('./date-utils');
 const {
     buildP57TagPayload,
+    findLatestTriggerAfter,
     findTriggeringMembers,
     getCancellationDate,
     getMemberId,
@@ -91,6 +92,44 @@ async function cancelBookingsForAssignedCycles(store, momence, assignedCycles) {
     }
 
     return { totalCancelled, failedCount };
+}
+
+async function refreshWaitingCycleTriggerDates(store, rawCancellations, cycles) {
+    const refreshedCycles = [];
+    let refreshedCount = 0;
+
+    for (const cycle of cycles) {
+        const latestTrigger = findLatestTriggerAfter(
+            rawCancellations,
+            cycle.memberId,
+            cycle.latestLateCancellationAt
+        );
+
+        if (!latestTrigger) {
+            refreshedCycles.push(cycle);
+            continue;
+        }
+
+        const latestLateCancellationAt = formatIST(latestTrigger.trigger.cancelledAt);
+        const p57EligibleAt = formatIST(new Date(latestTrigger.trigger.cancelledAt.getTime() + 7 * 24 * 60 * 60 * 1000));
+        const refreshedCycle = {
+            ...cycle,
+            latestLateCancellationAt,
+            p57EligibleAt,
+            actionComment: `${cycle.actionComment || ''} LC-7 waiting period reset because member reached another 3 late cancellations within 7 days. New trigger cancellation: ${latestLateCancellationAt}.`
+        };
+
+        await store.updateCycle(cycle.cycleId, {
+            latestLateCancellationAt,
+            p57EligibleAt,
+            actionComment: refreshedCycle.actionComment,
+            lastError: ''
+        });
+        refreshedCount++;
+        refreshedCycles.push(refreshedCycle);
+    }
+
+    return { refreshedCycles, refreshedCount };
 }
 
 async function transitionEligibleCycles(store, momence, cycles, now = new Date()) {
@@ -209,7 +248,9 @@ async function run() {
             await store.getCyclesByStatus(LIFECYCLE_STATUSES.WAITING_7_DAYS),
             config.testMemberId
         );
-        const { transitioned, failedCount: transitionFailures } = await transitionEligibleCycles(store, momence, waitingCycles);
+        const { refreshedCycles, refreshedCount } = await refreshWaitingCycleTriggerDates(store, reportRecords, waitingCycles);
+        if (refreshedCount > 0) console.log(`🔁 Reset LC-7 waiting period for ${refreshedCount} active lifecycle cycles`);
+        const { transitioned, failedCount: transitionFailures } = await transitionEligibleCycles(store, momence, refreshedCycles);
         log.p57Assigned = transitioned;
         log.failedCount += transitionFailures;
 
@@ -243,6 +284,7 @@ module.exports = {
     cancelBookingsForAssignedCycles,
     filterTestMember,
     mapRawCancellationRows,
+    refreshWaitingCycleTriggerDates,
     refreshCurrentLc7MembersSheet,
     run,
     transitionEligibleCycles
