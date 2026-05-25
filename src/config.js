@@ -24,9 +24,11 @@ function getConfig() {
         googleRefreshToken: process.env.GOOGLE_REFRESH_TOKEN,
         sheetId: process.env.LC7_LIFECYCLE_SHEET_ID,
         mail: {
-            apiUrl: process.env.MAILTRAP_API_URL,
+            apiUrl: process.env.MAILTRAP_API_URL || 'https://send.api.mailtrap.io/api/send',
             apiToken: process.env.MAILTRAP_API_TOKEN,
-            from: process.env.MAIL_FROM || 'latecancellations@physique57india.com'
+            from: process.env.MAIL_FROM || 'hello@physique57india.com',
+            fromName: process.env.MAIL_FROM_NAME || 'Mailtrap Test',
+            replyTo: process.env.MAIL_REPLY_TO || 'latecancellations@physique57india.com'
         },
         dryRun: process.env.DRY_RUN === 'true',
         testMemberId: process.env.TEST_MEMBER_ID ? Number(process.env.TEST_MEMBER_ID) : null,
@@ -41,7 +43,6 @@ function getConfig() {
         GOOGLE_CLIENT_SECRET: config.googleClientSecret,
         GOOGLE_REFRESH_TOKEN: config.googleRefreshToken,
         LC7_LIFECYCLE_SHEET_ID: config.sheetId,
-        MAILTRAP_API_URL: config.mail.apiUrl,
         MAILTRAP_API_TOKEN: config.mail.apiToken
     })) {
         if (!value) missing.push(key);

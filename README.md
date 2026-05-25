@@ -40,9 +40,11 @@ Create a separate Google Sheet and set:
 
 ```bash
 LC7_LIFECYCLE_SHEET_ID=your_new_sheet_id
-MAILTRAP_API_URL=https://sandbox.api.mailtrap.io/api/send/YOUR_INBOX_ID
+MAILTRAP_API_URL=https://send.api.mailtrap.io/api/send
 MAILTRAP_API_TOKEN=your_mailtrap_api_token
-MAIL_FROM=latecancellations@physique57india.com
+MAIL_FROM=hello@physique57india.com
+MAIL_FROM_NAME=Mailtrap Test
+MAIL_REPLY_TO=latecancellations@physique57india.com
 ```
 
 Do not reuse the old `GOOGLE_SHEET_ID`.

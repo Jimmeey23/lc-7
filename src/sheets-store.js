@@ -117,6 +117,95 @@ async function ensureSheet(doc, title, headers) {
     return sheet;
 }
 
+function looksLikeStatus(value) {
+    return Object.values(LIFECYCLE_STATUSES).includes(String(value || ''));
+}
+
+async function repairLifecycleRows(sheet) {
+    const rows = await sheet.getRows();
+    let repaired = 0;
+    for (const row of rows) {
+        const raw = row._rawData || [];
+        if (raw.length !== LIFECYCLE_HEADERS.length - 1) continue;
+        if (!raw[5] || !raw[6] || !looksLikeStatus(raw[11]) || looksLikeStatus(raw[12])) continue;
+
+        const shifted = [
+            raw[0],
+            raw[1],
+            raw[2],
+            raw[3],
+            raw[4],
+            '',
+            raw[5],
+            raw[6],
+            raw[7],
+            raw[8],
+            raw[9],
+            raw[10],
+            raw[11],
+            raw[12],
+            raw[13],
+            raw[14]
+        ];
+        for (let i = 0; i < LIFECYCLE_HEADERS.length; i++) {
+            row.set(LIFECYCLE_HEADERS[i], shifted[i] ?? '');
+        }
+        await row.save();
+        repaired++;
+    }
+    return repaired;
+}
+
+async function repairRunLogRows(sheet) {
+    const rows = await sheet.getRows();
+    let repaired = 0;
+    for (const row of rows) {
+        const raw = row._rawData || [];
+        if (raw.length > RUN_LOG_HEADERS.length - 2) continue;
+        if (!raw[10] || !['COMPLETED', 'FAILED'].includes(String(raw[10]))) continue;
+
+        const shifted = [
+            raw[0],
+            raw[1],
+            raw[2],
+            raw[3],
+            raw[4],
+            raw[5],
+            raw[6],
+            raw[7],
+            raw[8],
+            raw[9],
+            0,
+            0,
+            raw[10],
+            raw[11] || ''
+        ];
+        for (let i = 0; i < RUN_LOG_HEADERS.length; i++) {
+            row.set(RUN_LOG_HEADERS[i], shifted[i] ?? '');
+        }
+        await row.save();
+        repaired++;
+    }
+
+    for (const row of rows) {
+        if (!['COMPLETED', 'FAILED'].includes(String(row.get('status') || ''))) continue;
+        let changed = false;
+        if (row.get('emailsSent') === '') {
+            row.set('emailsSent', 0);
+            changed = true;
+        }
+        if (row.get('emailsFailed') === '') {
+            row.set('emailsFailed', 0);
+            changed = true;
+        }
+        if (changed) {
+            await row.save();
+            repaired++;
+        }
+    }
+    return repaired;
+}
+
 async function createSheetsStore(config) {
     const oAuth2Client = new OAuth2Client({
         clientId: config.googleClientId,
@@ -134,6 +223,13 @@ async function createSheetsStore(config) {
     const runLogSheet = await ensureSheet(doc, 'RunLog', RUN_LOG_HEADERS);
     const currentLc7Sheet = await ensureSheet(doc, 'CurrentLC7Members', CURRENT_LC7_HEADERS);
     const emailLogSheet = await ensureSheet(doc, 'EmailLog', EMAIL_LOG_HEADERS);
+    const repaired = {
+        lifecycle: await repairLifecycleRows(lifecycleSheet),
+        runLog: await repairRunLogRows(runLogSheet)
+    };
+    if (repaired.lifecycle || repaired.runLog) {
+        console.log(`Repaired shifted sheet rows: lifecycle=${repaired.lifecycle}, runLog=${repaired.runLog}`);
+    }
 
     async function getRawRows() {
         return (await rawSheet.getRows()).map(row => rowToObject(row, RAW_HEADERS));

@@ -31,9 +31,11 @@ GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REFRESH_TOKEN=
 LC7_LIFECYCLE_SHEET_ID=
-MAILTRAP_API_URL=https://sandbox.api.mailtrap.io/api/send/YOUR_INBOX_ID
+MAILTRAP_API_URL=https://send.api.mailtrap.io/api/send
 MAILTRAP_API_TOKEN=
-MAIL_FROM=latecancellations@physique57india.com
+MAIL_FROM=hello@physique57india.com
+MAIL_FROM_NAME=Mailtrap Test
+MAIL_REPLY_TO=latecancellations@physique57india.com
 CRON_SCHEDULE=*/5 * * * *
 DRY_RUN=false
 ```

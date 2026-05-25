@@ -55,11 +55,13 @@ test('shouldSendTemplateB requires removal date on or after May 25 IST regardles
 
 test('templates address the member by first name', () => {
     assert.equal(getFirstName(cycle()), 'Priya');
-    assert.match(buildTemplateA(cycle()).text, /^Hi Priya,/);
-    assert.match(buildTemplateB(cycle()).text, /^Hi Priya,/);
-    assert.match(buildTemplateA(cycle(), 'latecancellations@physique57india.com').html, /href="mailto:latecancellations@physique57india\.com\?/);
-    assert.match(buildTemplateA(cycle(), 'latecancellations@physique57india.com').html, />This is a mistake</);
-    assert.match(buildTemplateB(cycle(), 'latecancellations@physique57india.com').html, />Reply to this email</);
+    assert.deepEqual(buildTemplateA(cycle()).templateVariables, {
+        first_name: 'Priya',
+        your_name: 'Team Physique 57'
+    });
+    assert.deepEqual(buildTemplateB(cycle()).templateVariables, {
+        first_name: 'Priya'
+    });
 });
 
 test('sendTemplateA posts to Mailtrap API and logs sent email', async () => {
@@ -70,7 +72,9 @@ test('sendTemplateA posts to Mailtrap API and logs sent email', async () => {
         mail: {
             apiUrl: 'https://sandbox.api.mailtrap.io/api/send/123',
             apiToken: 'token',
-            from: 'latecancellations@physique57india.com'
+            from: 'hello@physique57india.com',
+            fromName: 'Mailtrap Test',
+            replyTo: 'latecancellations@physique57india.com'
         }
     }, {
         post: async (url, payload, options) => {
@@ -90,12 +94,18 @@ test('sendTemplateA posts to Mailtrap API and logs sent email', async () => {
     assert.equal(requests[0].url, 'https://sandbox.api.mailtrap.io/api/send/123');
     assert.equal(requests[0].options.headers.Authorization, 'Bearer token');
     assert.deepEqual(requests[0].payload.from, {
-        email: 'latecancellations@physique57india.com',
-        name: 'Team Physique 57'
+        email: 'hello@physique57india.com',
+        name: 'Mailtrap Test'
     });
     assert.deepEqual(requests[0].payload.reply_to, { email: 'latecancellations@physique57india.com' });
     assert.deepEqual(requests[0].payload.to, [{ email: 'priya@example.com' }]);
-    assert.match(requests[0].payload.html, /This is a mistake/);
+    assert.equal(requests[0].payload.template_uuid, 'c608e180-2366-4035-9c41-f4a54ca54caf');
+    assert.deepEqual(requests[0].payload.template_variables, {
+        first_name: 'Priya',
+        your_name: 'Team Physique 57'
+    });
+    assert.equal(requests[0].payload.text, undefined);
+    assert.equal(requests[0].payload.html, undefined);
     assert.equal(logs[0].status, 'SENT');
 });
 
@@ -126,5 +136,5 @@ test('retryFailedEmail resends failed emails using the original template', async
 
     assert.equal(result.sent, true);
     assert.deepEqual(requests[0].payload.to, [{ email: 'fallback@example.com' }]);
-    assert.equal(requests[0].payload.subject, 'Booking Privileges Paused for 7 Days (Late Cancellations)');
+    assert.equal(requests[0].payload.template_uuid, 'c608e180-2366-4035-9c41-f4a54ca54caf');
 });
