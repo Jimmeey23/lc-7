@@ -1,6 +1,9 @@
 {
-  "scripts": {
-    "start": "node src/scheduler.js",
-    "build": "npm install"
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "buildCommand": "npm install"
+  },
+  "deploy": {
+    "startCommand": "node src/scheduler.js"
   }
 }

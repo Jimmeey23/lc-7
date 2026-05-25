@@ -12,6 +12,14 @@ node src/scheduler.js
 
 Both `railway.json` and `Procfile` point to the scheduler.
 
+If Railway service settings still have an old custom start command, replace it with:
+
+```bash
+node src/scheduler.js
+```
+
+The root `schedule.js` file is kept only as a compatibility entrypoint for older deployments that still run `node schedule.js`.
+
 ## Required Variables
 
 Set these in Railway Variables:
