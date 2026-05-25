@@ -57,6 +57,9 @@ test('templates address the member by first name', () => {
     assert.equal(getFirstName(cycle()), 'Priya');
     assert.match(buildTemplateA(cycle()).text, /^Hi Priya,/);
     assert.match(buildTemplateB(cycle()).text, /^Hi Priya,/);
+    assert.match(buildTemplateA(cycle(), 'latecancellations@physique57india.com').html, /href="mailto:latecancellations@physique57india\.com\?/);
+    assert.match(buildTemplateA(cycle(), 'latecancellations@physique57india.com').html, />This is a mistake</);
+    assert.match(buildTemplateB(cycle(), 'latecancellations@physique57india.com').html, />Reply to this email</);
 });
 
 test('sendTemplateA posts to Mailtrap API and logs sent email', async () => {
@@ -90,6 +93,38 @@ test('sendTemplateA posts to Mailtrap API and logs sent email', async () => {
         email: 'latecancellations@physique57india.com',
         name: 'Team Physique 57'
     });
+    assert.deepEqual(requests[0].payload.reply_to, { email: 'latecancellations@physique57india.com' });
     assert.deepEqual(requests[0].payload.to, [{ email: 'priya@example.com' }]);
+    assert.match(requests[0].payload.html, /This is a mistake/);
     assert.equal(logs[0].status, 'SENT');
+});
+
+test('retryFailedEmail resends failed emails using the original template', async () => {
+    const requests = [];
+    const service = createEmailService({
+        dryRun: false,
+        mail: {
+            apiUrl: 'https://sandbox.api.mailtrap.io/api/send/123',
+            apiToken: 'token',
+            from: 'latecancellations@physique57india.com'
+        }
+    }, {
+        post: async (url, payload) => {
+            requests.push({ url, payload });
+            return { data: { success: true } };
+        }
+    });
+    const store = {
+        hasSentEmail: async () => false,
+        appendEmailLog: async () => {}
+    };
+
+    const result = await service.retryFailedEmail(store, cycle({ memberEmail: '' }), {
+        template: 'A',
+        memberEmail: 'fallback@example.com'
+    });
+
+    assert.equal(result.sent, true);
+    assert.deepEqual(requests[0].payload.to, [{ email: 'fallback@example.com' }]);
+    assert.equal(requests[0].payload.subject, 'Booking Privileges Paused for 7 Days (Late Cancellations)');
 });

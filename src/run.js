@@ -122,6 +122,30 @@ async function sendLifecycleEmails(store, emailService, cycles, template) {
     return { sent, failed };
 }
 
+async function retryFailedLifecycleEmails(store, emailService, cycles) {
+    const failedEmails = await store.getFailedEmailRows();
+    if (failedEmails.length === 0) return { sent: 0, failed: 0 };
+
+    const cycleById = new Map(cycles.map(cycle => [cycle.cycleId, cycle]));
+    let sent = 0;
+    let failed = 0;
+
+    for (const failedEmail of failedEmails) {
+        const cycle = cycleById.get(failedEmail.cycleId);
+        if (!cycle) continue;
+
+        try {
+            const result = await emailService.retryFailedEmail(store, { ...cycle }, failedEmail);
+            if (result.sent || result.dryRun) sent++;
+        } catch (error) {
+            failed++;
+            console.error(`Retry ${failedEmail.template} email failed for member ${failedEmail.memberId}: ${error.message}`);
+        }
+    }
+
+    return { sent, failed };
+}
+
 async function refreshWaitingCycleTriggerDates(store, rawCancellations, cycles) {
     const refreshedCycles = [];
     let refreshedCount = 0;
@@ -304,6 +328,13 @@ async function run() {
         log.emailsFailed += templateBResult.failed;
         log.failedCount += templateBResult.failed;
 
+        console.log('📧 Retrying failed lifecycle emails...');
+        const retryCycles = await store.getLifecycleRows();
+        const retryResult = await retryFailedLifecycleEmails(store, emailService, retryCycles);
+        log.emailsSent += retryResult.sent;
+        log.emailsFailed += retryResult.failed;
+        log.failedCount += retryResult.failed;
+
         console.log('📌 Refreshing CurrentLC7Members sheet...');
         await refreshCurrentLc7MembersSheet(store, momence, config.testMemberId);
 
@@ -334,6 +365,7 @@ module.exports = {
     cancelBookingsForAssignedCycles,
     filterTestMember,
     mapRawCancellationRows,
+    retryFailedLifecycleEmails,
     sendLifecycleEmails,
     refreshWaitingCycleTriggerDates,
     refreshCurrentLc7MembersSheet,

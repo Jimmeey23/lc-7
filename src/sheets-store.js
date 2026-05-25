@@ -218,6 +218,12 @@ async function createSheetsStore(config) {
         return rows.some(row => row.emailId === emailId && row.status === 'SENT');
     }
 
+    async function getFailedEmailRows() {
+        const rows = await getEmailLogRows();
+        const sent = new Set(rows.filter(row => row.status === 'SENT').map(row => row.emailId));
+        return rows.filter(row => row.status === 'FAILED' && !sent.has(row.emailId));
+    }
+
     async function appendEmailLog(log) {
         await emailLogSheet.addRow({
             emailId: log.emailId,
@@ -256,6 +262,7 @@ async function createSheetsStore(config) {
         appendEmailLog,
         getCyclesByStatus,
         getEmailLogRows,
+        getFailedEmailRows,
         getLifecycleRows,
         hasSentEmail,
         insertLifecycleRows,
