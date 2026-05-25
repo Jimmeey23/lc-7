@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "start": "node src/scheduler.js",
+    "build": "npm install"
+  }
+}
