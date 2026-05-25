@@ -23,6 +23,13 @@ function getConfig() {
         googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
         googleRefreshToken: process.env.GOOGLE_REFRESH_TOKEN,
         sheetId: process.env.LC7_LIFECYCLE_SHEET_ID,
+        mail: {
+            host: process.env.MAILTRAP_SMTP_HOST,
+            port: process.env.MAILTRAP_SMTP_PORT ? Number(process.env.MAILTRAP_SMTP_PORT) : 2525,
+            user: process.env.MAILTRAP_SMTP_USER,
+            pass: process.env.MAILTRAP_SMTP_PASS,
+            from: process.env.MAIL_FROM || 'latecancellations@physique57india.com'
+        },
         dryRun: process.env.DRY_RUN === 'true',
         testMemberId: process.env.TEST_MEMBER_ID ? Number(process.env.TEST_MEMBER_ID) : null,
         cronSchedule: process.env.CRON_SCHEDULE || '*/5 * * * *'
@@ -35,7 +42,10 @@ function getConfig() {
         GOOGLE_CLIENT_ID: config.googleClientId,
         GOOGLE_CLIENT_SECRET: config.googleClientSecret,
         GOOGLE_REFRESH_TOKEN: config.googleRefreshToken,
-        LC7_LIFECYCLE_SHEET_ID: config.sheetId
+        LC7_LIFECYCLE_SHEET_ID: config.sheetId,
+        MAILTRAP_SMTP_HOST: config.mail.host,
+        MAILTRAP_SMTP_USER: config.mail.user,
+        MAILTRAP_SMTP_PASS: config.mail.pass
     })) {
         if (!value) missing.push(key);
     }

@@ -23,6 +23,7 @@ const LIFECYCLE_HEADERS = [
     'memberName',
     'memberEmail',
     'latestLateCancellationAt',
+    'triggerWindowDates',
     'lc7TriggeredAt',
     'lc7TagAssignedAt',
     'futureBookingsCancelledAt',
@@ -46,6 +47,8 @@ const RUN_LOG_HEADERS = [
     'bookingsCancelled',
     'p57Assigned',
     'failedCount',
+    'emailsSent',
+    'emailsFailed',
     'status',
     'message'
 ];
@@ -60,6 +63,19 @@ const CURRENT_LC7_HEADERS = [
     'status',
     'comment',
     'refreshedAt'
+];
+
+const EMAIL_LOG_HEADERS = [
+    'emailId',
+    'cycleId',
+    'memberId',
+    'memberEmail',
+    'template',
+    'subject',
+    'status',
+    'relatedDate',
+    'sentAt',
+    'error'
 ];
 
 function rowToObject(row, headers) {
@@ -117,6 +133,7 @@ async function createSheetsStore(config) {
     const lifecycleSheet = await ensureSheet(doc, 'LC7Lifecycle', LIFECYCLE_HEADERS);
     const runLogSheet = await ensureSheet(doc, 'RunLog', RUN_LOG_HEADERS);
     const currentLc7Sheet = await ensureSheet(doc, 'CurrentLC7Members', CURRENT_LC7_HEADERS);
+    const emailLogSheet = await ensureSheet(doc, 'EmailLog', EMAIL_LOG_HEADERS);
 
     async function getRawRows() {
         return (await rawSheet.getRows()).map(row => rowToObject(row, RAW_HEADERS));
@@ -144,6 +161,7 @@ async function createSheetsStore(config) {
                 memberName: cycle.memberName,
                 memberEmail: cycle.memberEmail,
                 latestLateCancellationAt: cycle.latestLateCancellationAt,
+                triggerWindowDates: Array.isArray(cycle.triggerWindowDates) ? cycle.triggerWindowDates.join(' | ') : cycle.triggerWindowDates || '',
                 lc7TriggeredAt: cycle.lc7TriggeredAt,
                 lc7TagAssignedAt: '',
                 futureBookingsCancelledAt: '',
@@ -184,8 +202,34 @@ async function createSheetsStore(config) {
             bookingsCancelled: log.bookingsCancelled || 0,
             p57Assigned: log.p57Assigned || 0,
             failedCount: log.failedCount || 0,
+            emailsSent: log.emailsSent || 0,
+            emailsFailed: log.emailsFailed || 0,
             status: log.status || 'COMPLETED',
             message: log.message || ''
+        });
+    }
+
+    async function getEmailLogRows() {
+        return (await emailLogSheet.getRows()).map(row => rowToObject(row, EMAIL_LOG_HEADERS));
+    }
+
+    async function hasSentEmail(emailId) {
+        const rows = await getEmailLogRows();
+        return rows.some(row => row.emailId === emailId && row.status === 'SENT');
+    }
+
+    async function appendEmailLog(log) {
+        await emailLogSheet.addRow({
+            emailId: log.emailId,
+            cycleId: log.cycleId || '',
+            memberId: log.memberId || '',
+            memberEmail: log.memberEmail || '',
+            template: log.template || '',
+            subject: log.subject || '',
+            status: log.status || '',
+            relatedDate: log.relatedDate || '',
+            sentAt: log.sentAt || formatRunTimestamp(),
+            error: log.error || ''
         });
     }
 
@@ -209,8 +253,11 @@ async function createSheetsStore(config) {
 
     return {
         appendRunLog,
+        appendEmailLog,
         getCyclesByStatus,
+        getEmailLogRows,
         getLifecycleRows,
+        hasSentEmail,
         insertLifecycleRows,
         insertRawRows,
         refreshCurrentLc7Members,
@@ -222,6 +269,7 @@ module.exports = {
     createSheetsStore,
     LIFECYCLE_HEADERS,
     CURRENT_LC7_HEADERS,
+    EMAIL_LOG_HEADERS,
     RAW_HEADERS,
     RUN_LOG_HEADERS
 };

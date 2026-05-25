@@ -10,6 +10,7 @@ const {
     makeRawCancellationId,
     shouldTransitionToP57
 } = require('./lifecycle');
+const { createEmailService } = require('./email-service');
 const { createMomenceClient } = require('./momence-client');
 const { createSheetsStore } = require('./sheets-store');
 
@@ -66,20 +67,28 @@ async function assignLc7ForNewCycles(store, momence, cycles) {
 async function cancelBookingsForAssignedCycles(store, momence, assignedCycles) {
     let totalCancelled = 0;
     let failedCount = 0;
+    const completedCycles = [];
 
     for (const cycle of assignedCycles) {
         try {
             const result = await momence.cancelFutureBookings(cycle.memberId);
             totalCancelled += result.successful;
+            const futureBookingsCancelledAt = formatRunTimestamp();
 
             await store.updateCycle(cycle.cycleId, {
-                futureBookingsCancelledAt: formatRunTimestamp(),
+                futureBookingsCancelledAt,
                 futureBookingsCancelledCount: result.successful,
                 status: LIFECYCLE_STATUSES.WAITING_7_DAYS,
                 actionComment: `Future booking cancellation ran immediately after LC-7 assignment. ${result.successful}/${result.total} future bookings cancelled. Waiting until more than 7 days after latest late cancellation before P57 transition.`,
                 lastError: result.failed.length > 0
                     ? `Failed booking cancellations: ${result.failed.map(item => `${item.bookingId}:${item.error}`).join(',')}`
                     : ''
+            });
+            completedCycles.push({
+                ...cycle,
+                futureBookingsCancelledAt,
+                futureBookingsCancelledCount: result.successful,
+                status: LIFECYCLE_STATUSES.WAITING_7_DAYS
             });
         } catch (error) {
             failedCount++;
@@ -91,7 +100,26 @@ async function cancelBookingsForAssignedCycles(store, momence, assignedCycles) {
         }
     }
 
-    return { totalCancelled, failedCount };
+    return { completedCycles, totalCancelled, failedCount };
+}
+
+async function sendLifecycleEmails(store, emailService, cycles, template) {
+    let sent = 0;
+    let failed = 0;
+
+    for (const cycle of cycles) {
+        try {
+            const result = template === 'A'
+                ? await emailService.sendTemplateA(store, cycle)
+                : await emailService.sendTemplateB(store, cycle);
+            if (result.sent || result.dryRun) sent++;
+        } catch (error) {
+            failed++;
+            console.error(`Template ${template} email failed for member ${cycle.memberId}: ${error.message}`);
+        }
+    }
+
+    return { sent, failed };
 }
 
 async function refreshWaitingCycleTriggerDates(store, rawCancellations, cycles) {
@@ -203,6 +231,8 @@ async function run() {
         bookingsCancelled: 0,
         p57Assigned: 0,
         failedCount: 0,
+        emailsSent: 0,
+        emailsFailed: 0,
         status: 'COMPLETED',
         message: ''
     };
@@ -213,6 +243,7 @@ async function run() {
         console.log('⚙️ Loading configuration...');
         const config = getConfig();
         const momence = createMomenceClient(config);
+        const emailService = createEmailService(config);
 
         if (config.dryRun) console.log('🧪 DRY_RUN=true: Momence mutations are skipped');
         if (config.testMemberId) console.log(`🧪 TEST_MEMBER_ID=${config.testMemberId}`);
@@ -239,7 +270,10 @@ async function run() {
         log.failedCount += lc7Failures;
 
         console.log(`🚫 Cancelling future bookings for ${assigned.length} newly assigned LC-7 members...`);
-        const { totalCancelled, failedCount: cancelFailures } = await cancelBookingsForAssignedCycles(store, momence, assigned);
+        const {
+            totalCancelled,
+            failedCount: cancelFailures
+        } = await cancelBookingsForAssignedCycles(store, momence, assigned);
         log.bookingsCancelled = totalCancelled;
         log.failedCount += cancelFailures;
 
@@ -248,11 +282,27 @@ async function run() {
             await store.getCyclesByStatus(LIFECYCLE_STATUSES.WAITING_7_DAYS),
             config.testMemberId
         );
+        console.log('📧 Sending LC-7 pause emails for eligible active cycles...');
+        const templateAResult = await sendLifecycleEmails(store, emailService, waitingCycles, 'A');
+        log.emailsSent += templateAResult.sent;
+        log.emailsFailed += templateAResult.failed;
+        log.failedCount += templateAResult.failed;
+
         const { refreshedCycles, refreshedCount } = await refreshWaitingCycleTriggerDates(store, reportRecords, waitingCycles);
         if (refreshedCount > 0) console.log(`🔁 Reset LC-7 waiting period for ${refreshedCount} active lifecycle cycles`);
         const { transitioned, failedCount: transitionFailures } = await transitionEligibleCycles(store, momence, refreshedCycles);
         log.p57Assigned = transitioned;
         log.failedCount += transitionFailures;
+
+        console.log('📧 Sending booking-restored emails for eligible P57 cycles...');
+        const p57Cycles = filterTestMember(
+            await store.getCyclesByStatus(LIFECYCLE_STATUSES.P57_TAG_ASSIGNED),
+            config.testMemberId
+        );
+        const templateBResult = await sendLifecycleEmails(store, emailService, p57Cycles, 'B');
+        log.emailsSent += templateBResult.sent;
+        log.emailsFailed += templateBResult.failed;
+        log.failedCount += templateBResult.failed;
 
         console.log('📌 Refreshing CurrentLC7Members sheet...');
         await refreshCurrentLc7MembersSheet(store, momence, config.testMemberId);
@@ -284,6 +334,7 @@ module.exports = {
     cancelBookingsForAssignedCycles,
     filterTestMember,
     mapRawCancellationRows,
+    sendLifecycleEmails,
     refreshWaitingCycleTriggerDates,
     refreshCurrentLc7MembersSheet,
     run,

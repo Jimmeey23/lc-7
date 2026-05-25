@@ -132,6 +132,7 @@ function buildDetection(memberId, trigger, now) {
         memberName: latest.record.customerName || latest.record.memberName || '',
         memberEmail: latest.record.customerEmail || latest.record.email || '',
         latestLateCancellationAt: formatIST(latest.cancelledAt),
+        triggerWindowDates: window.map(entry => formatIST(entry.cancelledAt)),
         lc7TriggeredAt: formatIST(now),
         p57EligibleAt: formatIST(new Date(latest.cancelledAt.getTime() + SEVEN_DAYS_MS)),
         occurrenceCount: window.length,

@@ -40,6 +40,11 @@ Create a separate Google Sheet and set:
 
 ```bash
 LC7_LIFECYCLE_SHEET_ID=your_new_sheet_id
+MAILTRAP_SMTP_HOST=sandbox.smtp.mailtrap.io
+MAILTRAP_SMTP_PORT=2525
+MAILTRAP_SMTP_USER=your_mailtrap_user
+MAILTRAP_SMTP_PASS=your_mailtrap_password
+MAIL_FROM=latecancellations@physique57india.com
 ```
 
 Do not reuse the old `GOOGLE_SHEET_ID`.
