@@ -109,6 +109,41 @@ test('sendTemplateA posts to Mailtrap API and logs sent email', async () => {
     assert.equal(logs[0].status, 'SENT');
 });
 
+test('sendTemplateB posts dynamic first_name from the member name', async () => {
+    const requests = [];
+    const service = createEmailService({
+        dryRun: false,
+        mail: {
+            apiUrl: 'https://send.api.mailtrap.io/api/send',
+            apiToken: 'token',
+            from: 'hello@physique57india.com',
+            fromName: 'Mailtrap Test',
+            replyTo: 'latecancellations@physique57india.com'
+        }
+    }, {
+        post: async (url, payload) => {
+            requests.push({ url, payload });
+            return { data: { success: true } };
+        }
+    });
+    const store = {
+        hasSentEmail: async () => false,
+        appendEmailLog: async () => {}
+    };
+
+    const result = await service.sendTemplateB(store, cycle({
+        memberName: 'Aisha Mehta',
+        memberEmail: 'aisha@example.com'
+    }));
+
+    assert.equal(result.sent, true);
+    assert.equal(requests[0].payload.template_uuid, 'd5c9a2a0-2e55-48cf-9016-36f48330564b');
+    assert.deepEqual(requests[0].payload.template_variables, {
+        first_name: 'Aisha'
+    });
+    assert.deepEqual(requests[0].payload.to, [{ email: 'aisha@example.com' }]);
+});
+
 test('retryFailedEmail resends failed emails using the original template', async () => {
     const requests = [];
     const service = createEmailService({
