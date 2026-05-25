@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
+const axios = require('axios');
 const { formatRunTimestamp, parseDate } = require('./date-utils');
 
 const EMAIL_POLICY_CUTOFF_AT = new Date('2026-05-24T18:30:00.000Z');
@@ -86,15 +86,28 @@ Team Physique 57`
     };
 }
 
-function createEmailService(config) {
-    const transporter = nodemailer.createTransport({
-        host: config.mail.host,
-        port: config.mail.port,
-        auth: {
-            user: config.mail.user,
-            pass: config.mail.pass
-        }
-    });
+function createEmailService(config, httpClient = axios) {
+    async function sendMail(message, cycle) {
+        return httpClient.post(
+            config.mail.apiUrl,
+            {
+                from: {
+                    email: config.mail.from,
+                    name: 'Team Physique 57'
+                },
+                to: [{ email: cycle.memberEmail }],
+                subject: message.subject,
+                text: message.text
+            },
+            {
+                headers: {
+                    Authorization: `Bearer ${config.mail.apiToken}`,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 30000
+            }
+        );
+    }
 
     async function sendLifecycleEmail(store, cycle, template) {
         const message = template === 'A' ? buildTemplateA(cycle) : buildTemplateB(cycle);
@@ -117,12 +130,7 @@ function createEmailService(config) {
 
         try {
             if (!config.dryRun) {
-                await transporter.sendMail({
-                    from: config.mail.from,
-                    to: cycle.memberEmail,
-                    subject: message.subject,
-                    text: message.text
-                });
+                await sendMail(message, cycle);
             }
             await store.appendEmailLog({
                 ...logBase,

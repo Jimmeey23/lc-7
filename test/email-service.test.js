@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
     buildTemplateA,
     buildTemplateB,
+    createEmailService,
     getFirstName,
     shouldSendTemplateA,
     shouldSendTemplateB
@@ -56,4 +57,39 @@ test('templates address the member by first name', () => {
     assert.equal(getFirstName(cycle()), 'Priya');
     assert.match(buildTemplateA(cycle()).text, /^Hi Priya,/);
     assert.match(buildTemplateB(cycle()).text, /^Hi Priya,/);
+});
+
+test('sendTemplateA posts to Mailtrap API and logs sent email', async () => {
+    const requests = [];
+    const logs = [];
+    const service = createEmailService({
+        dryRun: false,
+        mail: {
+            apiUrl: 'https://sandbox.api.mailtrap.io/api/send/123',
+            apiToken: 'token',
+            from: 'latecancellations@physique57india.com'
+        }
+    }, {
+        post: async (url, payload, options) => {
+            requests.push({ url, payload, options });
+            return { data: { success: true } };
+        }
+    });
+    const store = {
+        hasSentEmail: async () => false,
+        appendEmailLog: async log => logs.push(log)
+    };
+
+    const result = await service.sendTemplateA(store, cycle());
+
+    assert.equal(result.sent, true);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, 'https://sandbox.api.mailtrap.io/api/send/123');
+    assert.equal(requests[0].options.headers.Authorization, 'Bearer token');
+    assert.deepEqual(requests[0].payload.from, {
+        email: 'latecancellations@physique57india.com',
+        name: 'Team Physique 57'
+    });
+    assert.deepEqual(requests[0].payload.to, [{ email: 'priya@example.com' }]);
+    assert.equal(logs[0].status, 'SENT');
 });
