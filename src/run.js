@@ -164,17 +164,18 @@ async function refreshWaitingCycleTriggerDates(store, rawCancellations, cycles) 
 
         const latestLateCancellationAt = formatIST(latestTrigger.trigger.cancelledAt);
         const p57EligibleAt = formatIST(new Date(latestTrigger.trigger.cancelledAt.getTime() + 7 * 24 * 60 * 60 * 1000));
+        const actionComment = `LC-7 waiting period reset because member reached another 3 late cancellations within 7 days. New trigger cancellation: ${latestLateCancellationAt}.`;
         const refreshedCycle = {
             ...cycle,
             latestLateCancellationAt,
             p57EligibleAt,
-            actionComment: `${cycle.actionComment || ''} LC-7 waiting period reset because member reached another 3 late cancellations within 7 days. New trigger cancellation: ${latestLateCancellationAt}.`
+            actionComment
         };
 
         await store.updateCycle(cycle.cycleId, {
             latestLateCancellationAt,
             p57EligibleAt,
-            actionComment: refreshedCycle.actionComment,
+            actionComment,
             lastError: ''
         });
         refreshedCount++;

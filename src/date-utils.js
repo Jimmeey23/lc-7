@@ -1,7 +1,7 @@
 function parseDate(value) {
     if (!value) return null;
     if (typeof value === 'string') {
-        const match = value.match(/^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2}):(\d{2})$/);
+        const match = value.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4}) (\d{2}):(\d{2}):(\d{2})$/);
         if (match) {
             const [, day, month, year, hour, minute, second] = match;
             const utcMs = Date.UTC(

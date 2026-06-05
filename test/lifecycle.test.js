@@ -161,3 +161,8 @@ test('formatIST writes sheet dates as DD-MM-YYYY HH:MM:SS and parseDate reads th
     assert.equal(formatted, '25-05-2026 11:38:02');
     assert.equal(parseDate(formatted).toISOString(), '2026-05-25T06:08:02.000Z');
 });
+
+test('parseDate reads Google Sheets formatted dates with slashes or non-padded month', () => {
+    assert.equal(parseDate('22-5-2026 23:49:14').toISOString(), '2026-05-22T18:19:14.000Z');
+    assert.equal(parseDate('29/05/2026 23:49:14').toISOString(), '2026-05-29T18:19:14.000Z');
+});
