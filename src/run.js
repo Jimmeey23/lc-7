@@ -124,15 +124,51 @@ async function cancelBookingsForAssignedCycles(store, momence, assignedCycles) {
     return { completedCycles, totalCancelled, failedCount };
 }
 
+function getSentEmailIds(emailLogRows) {
+    return new Set(
+        emailLogRows
+            .filter(row => row.status === 'SENT')
+            .map(row => row.emailId)
+            .filter(Boolean)
+    );
+}
+
+function getPendingFailedEmailRows(emailLogRows) {
+    const sentEmailIds = getSentEmailIds(emailLogRows);
+    return emailLogRows.filter(row =>
+        row.status === 'FAILED' &&
+        !sentEmailIds.has(row.emailId)
+    );
+}
+
+async function createCachedEmailStore(store, emailLogRows = null) {
+    const rows = emailLogRows || await store.getEmailLogRows();
+    const sentEmailIds = getSentEmailIds(rows);
+
+    return {
+        ...store,
+        hasSentEmail: async emailId => Boolean(emailId && sentEmailIds.has(emailId)),
+        appendEmailLog: async log => {
+            await store.appendEmailLog(log);
+            if (log.status === 'SENT' && log.emailId) {
+                sentEmailIds.add(log.emailId);
+            }
+        }
+    };
+}
+
 async function sendLifecycleEmails(store, emailService, cycles, template) {
+    if (cycles.length === 0) return { sent: 0, failed: 0 };
+
+    const emailStore = await createCachedEmailStore(store);
     let sent = 0;
     let failed = 0;
 
     for (const cycle of cycles) {
         try {
             const result = template === 'A'
-                ? await emailService.sendTemplateA(store, cycle)
-                : await emailService.sendTemplateB(store, cycle);
+                ? await emailService.sendTemplateA(emailStore, cycle)
+                : await emailService.sendTemplateB(emailStore, cycle);
             if (result.sent || result.dryRun) sent++;
         } catch (error) {
             failed++;
@@ -144,9 +180,11 @@ async function sendLifecycleEmails(store, emailService, cycles, template) {
 }
 
 async function retryFailedLifecycleEmails(store, emailService, cycles) {
-    const failedEmails = await store.getFailedEmailRows();
+    const emailLogRows = await store.getEmailLogRows();
+    const failedEmails = getPendingFailedEmailRows(emailLogRows);
     if (failedEmails.length === 0) return { sent: 0, failed: 0 };
 
+    const emailStore = await createCachedEmailStore(store, emailLogRows);
     const cycleById = new Map(cycles.map(cycle => [cycle.cycleId, cycle]));
     let sent = 0;
     let failed = 0;
@@ -156,7 +194,7 @@ async function retryFailedLifecycleEmails(store, emailService, cycles) {
         if (!cycle) continue;
 
         try {
-            const result = await emailService.retryFailedEmail(store, { ...cycle }, failedEmail);
+            const result = await emailService.retryFailedEmail(emailStore, { ...cycle }, failedEmail);
             if (result.sent || result.dryRun) sent++;
         } catch (error) {
             failed++;

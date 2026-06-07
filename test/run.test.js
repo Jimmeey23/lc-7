@@ -1,7 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { LIFECYCLE_STATUSES } = require('../src/config');
-const { processOverrideCycles, refreshWaitingCycleTriggerDates, transitionEligibleCycles } = require('../src/run');
+const { createEmailService } = require('../src/email-service');
+const {
+    processOverrideCycles,
+    refreshWaitingCycleTriggerDates,
+    retryFailedLifecycleEmails,
+    sendLifecycleEmails,
+    transitionEligibleCycles
+} = require('../src/run');
 
 function cancellation(memberId, cancelledDate) {
     return {
@@ -12,6 +19,37 @@ function cancellation(memberId, cancelledDate) {
         sessionDate: cancelledDate,
         membershipName: 'Studio Annual Unlimited Membership'
     };
+}
+
+function emailCycle(overrides = {}) {
+    return {
+        cycleId: 'cycle-1',
+        memberId: 100,
+        memberName: 'Member One',
+        memberEmail: 'member@example.com',
+        latestLateCancellationAt: '27-05-2026 10:00:00',
+        p57EligibleAt: '03-06-2026 10:00:00',
+        status: LIFECYCLE_STATUSES.P57_TAG_ASSIGNED,
+        ...overrides
+    };
+}
+
+function makeEmailService(requests) {
+    return createEmailService({
+        dryRun: false,
+        mail: {
+            apiUrl: 'https://sandbox.api.mailtrap.io/api/send/123',
+            apiToken: 'token',
+            from: 'hello@physique57india.com',
+            fromName: 'Mailtrap Test',
+            replyTo: 'latecancellations@physique57india.com'
+        }
+    }, {
+        post: async (url, payload) => {
+            requests.push({ url, payload });
+            return { data: { success: true } };
+        }
+    });
 }
 
 test('refreshWaitingCycleTriggerDates writes a bounded reset comment instead of appending old sheet history', async () => {
@@ -70,6 +108,75 @@ test('processOverrideCycles removes LC-7, adds P57, and consumes OVERRIDE status
     assert.equal(updates[0].changes.lastError, '');
     assert.match(updates[0].changes.p57TagAssignedAt, /^\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}$/);
     assert.match(updates[0].changes.actionComment, /Manual OVERRIDE consumed/);
+});
+
+test('sendLifecycleEmails reads EmailLog once for batch dedupe', async () => {
+    const requests = [];
+    const logs = [];
+    let emailLogReads = 0;
+    const store = {
+        getEmailLogRows: async () => {
+            emailLogReads++;
+            return [];
+        },
+        hasSentEmail: async () => {
+            throw new Error('uncached hasSentEmail should not be used during batch send');
+        },
+        appendEmailLog: async log => logs.push(log)
+    };
+
+    const result = await sendLifecycleEmails(store, makeEmailService(requests), [
+        emailCycle({ cycleId: 'cycle-1', memberId: 100, memberEmail: 'one@example.com' }),
+        emailCycle({ cycleId: 'cycle-2', memberId: 200, memberEmail: 'two@example.com' })
+    ], 'B');
+
+    assert.equal(result.sent, 2);
+    assert.equal(result.failed, 0);
+    assert.equal(emailLogReads, 1);
+    assert.equal(requests.length, 2);
+    assert.equal(logs.length, 2);
+});
+
+test('retryFailedLifecycleEmails reuses one EmailLog read for failed rows and dedupe', async () => {
+    const requests = [];
+    const logs = [];
+    let emailLogReads = 0;
+    const store = {
+        getEmailLogRows: async () => {
+            emailLogReads++;
+            return [{
+                emailId: 'failed-email-id',
+                cycleId: 'cycle-1',
+                memberId: 100,
+                memberEmail: 'fallback@example.com',
+                template: 'A',
+                status: 'FAILED'
+            }];
+        },
+        getFailedEmailRows: async () => {
+            throw new Error('uncached getFailedEmailRows should not be used during retry');
+        },
+        hasSentEmail: async () => {
+            throw new Error('uncached hasSentEmail should not be used during retry');
+        },
+        appendEmailLog: async log => logs.push(log)
+    };
+
+    const result = await retryFailedLifecycleEmails(store, makeEmailService(requests), [
+        emailCycle({
+            cycleId: 'cycle-1',
+            memberId: 100,
+            memberEmail: '',
+            status: LIFECYCLE_STATUSES.WAITING_7_DAYS
+        })
+    ]);
+
+    assert.equal(result.sent, 1);
+    assert.equal(result.failed, 0);
+    assert.equal(emailLogReads, 1);
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0].payload.to, [{ email: 'fallback@example.com' }]);
+    assert.equal(logs.length, 1);
 });
 
 test('transitionEligibleCycles assigns P57 when eligible waiting cycle has no lifecycle tags', async () => {
