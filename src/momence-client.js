@@ -19,23 +19,45 @@ function createMomenceClient(config) {
 
     const api = axios.create({ headers, timeout: 30000 });
 
-    async function requestWithRetry(fn, retries = 2) {
+    const rateLimitMs = config.momenceRateLimitMs || 200;
+    let lastCallAt = 0;
+
+    async function throttle() {
+        const now = Date.now();
+        const gap = now - lastCallAt;
+        if (gap < rateLimitMs) {
+            await new Promise(resolve => setTimeout(resolve, rateLimitMs - gap));
+        }
+        lastCallAt = Date.now();
+    }
+
+    async function requestWithRetry(fn, retries = 3, baseDelayMs = 2000) {
+        await throttle();
         for (let attempt = 0; attempt <= retries; attempt++) {
             try {
                 return await fn();
             } catch (error) {
                 const status = error.response?.status;
-                if (attempt < retries && status !== 404) {
-                    await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+                if (attempt >= retries || status === 404 || status === 400 || status === 422) {
+                    throw error;
+                }
+                if (status === 429) {
+                    const retryAfter = Number(error.response?.headers?.['retry-after']) || 60;
+                    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
                     continue;
                 }
-                throw error;
+                const jitter = Math.floor(Math.random() * 500);
+                await new Promise(resolve => setTimeout(resolve, baseDelayMs * (attempt + 1) + jitter));
             }
         }
     }
 
-    async function startLateCancellationReport() {
+    async function startLateCancellationReport(lookbackDays = 30) {
         const url = `https://api.momence.com/host/${config.hostId}/reports/late-cancellations/async`;
+        const safeDays = Math.max(lookbackDays, 14);
+        const endDate = new Date();
+        const startDate = new Date(endDate.getTime() - safeDays * 24 * 60 * 60 * 1000);
+
         const payload = {
             timeZone: 'Asia/Kolkata',
             groupRecurring: false,
@@ -43,16 +65,16 @@ function createMomenceClient(config) {
             includeVatInRevenue: true,
             useBookedEntityDateRange: false,
             excludeMembershipRenews: false,
-            day: '2025-10-02T00:00:00.000Z',
+            day: endDate.toISOString(),
             moneyCreditSalesFilter: 'filterOutSalesPaidByMoneyCredits',
             hideVoided: false,
             excludeInactiveMembers: false,
             includeRefunds: false,
             showOnlySpotfillerRevenue: false,
-            startDate: '2025-09-30T18:30:00.000Z',
-            endDate: '2026-12-31T18:29:00.000Z',
-            startDate2: '2025-09-30T18:30:00.000Z',
-            endDate2: '2026-10-31T18:29:59.999Z',
+            startDate: startDate.toISOString(),
+            endDate: endDate.toISOString(),
+            startDate2: startDate.toISOString(),
+            endDate2: endDate.toISOString(),
             datePreset: -1,
             datePreset2: 4
         };
@@ -66,19 +88,22 @@ function createMomenceClient(config) {
 
     async function fetchLateCancellationReport(reportRunId) {
         const url = `https://api.momence.com/host/${config.hostId}/reports/late-cancellations/report-runs/${reportRunId}`;
-        for (let attempt = 1; attempt <= 10; attempt++) {
+        const maxAttempts = config.reportPollAttempts || 15;
+        const intervalMs = config.reportPollIntervalMs || 3000;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             const response = await requestWithRetry(() => api.get(url));
             const items = response.data?.reportData?.items;
             if (response.data?.status === 'completed' || items) {
                 return items || [];
             }
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
         }
-        throw new Error(`Late-cancellation report ${reportRunId} did not complete`);
+        throw new Error(`Late-cancellation report ${reportRunId} did not complete after ${maxAttempts} attempts`);
     }
 
-    async function fetchLateCancellations() {
-        const reportRunId = await startLateCancellationReport();
+    async function fetchLateCancellations(lookbackDays) {
+        const reportRunId = await startLateCancellationReport(lookbackDays);
         return fetchLateCancellationReport(reportRunId);
     }
 

@@ -9,7 +9,17 @@ const TEMPLATE_B_SUBJECT = 'Notification: Your Booking Privileges Are Now Restor
 const TEMPLATE_A_UUID = 'c608e180-2366-4035-9c41-f4a54ca54caf';
 const TEMPLATE_B_UUID = 'd5c9a2a0-2e55-48cf-9016-36f48330564b';
 
-function makeEmailId(template, cycle, relatedDate = '') {
+// Stable email ID — based only on immutable fields; unaffected by trigger date refreshes
+function makeEmailId(template, cycle) {
+    return crypto
+        .createHash('sha1')
+        .update([template, 'v2', cycle.cycleId].join('|'))
+        .digest('hex');
+}
+
+// Legacy format — kept for backward-compat dedup check against existing EmailLog rows
+function makeLegacyEmailId(template, cycle) {
+    const relatedDate = template === 'A' ? cycle.latestLateCancellationAt : cycle.p57EligibleAt;
     return crypto
         .createHash('sha1')
         .update([template, cycle.cycleId, cycle.memberId, relatedDate].join('|'))
@@ -23,14 +33,22 @@ function getFirstName(cycle) {
 }
 
 function areAllTriggerDatesOnOrAfterEmailCutoff(cycle) {
-    const dates = Array.isArray(cycle.triggerWindowDates)
-        ? cycle.triggerWindowDates
-        : String(cycle.triggerWindowDates || '').split('|').map(value => value.trim()).filter(Boolean);
-    if (dates.length < 3) return false;
-    return dates.slice(0, 3).every(value => {
-        const date = parseDate(value);
-        return date && date >= EMAIL_POLICY_CUTOFF_AT;
-    });
+    // Prefer triggerWindowDates if present (legacy rows may still have it)
+    const raw = cycle.triggerWindowDates;
+    if (raw) {
+        const dates = Array.isArray(raw)
+            ? raw
+            : String(raw).split('|').map(v => v.trim()).filter(Boolean);
+        if (dates.length >= 3) {
+            return dates.slice(0, 3).every(v => {
+                const date = parseDate(v);
+                return date && date >= EMAIL_POLICY_CUTOFF_AT;
+            });
+        }
+    }
+    // Fallback: trigger date itself must be on/after cutoff
+    const triggerDate = parseDate(cycle.latestLateCancellationAt);
+    return Boolean(triggerDate && triggerDate >= EMAIL_POLICY_CUTOFF_AT);
 }
 
 function isRemovalDateOnOrAfterEmailCutoff(cycle) {
@@ -39,10 +57,14 @@ function isRemovalDateOnOrAfterEmailCutoff(cycle) {
 }
 
 function shouldSendTemplateA(cycle) {
+    // Never send Template A for backdated/silent assignments
+    if (cycle.assignmentReason && cycle.assignmentReason.startsWith('Backdated')) return false;
     return Boolean(cycle.memberEmail && areAllTriggerDatesOnOrAfterEmailCutoff(cycle));
 }
 
 function shouldSendTemplateB(cycle) {
+    // Never send Template B for expired-backdated cycles (penalty was never enforced)
+    if (cycle.assignmentReason && cycle.assignmentReason.startsWith('Backdated') && !cycle.lc7TagAssignedAt) return false;
     return Boolean(cycle.memberEmail && isRemovalDateOnOrAfterEmailCutoff(cycle));
 }
 
@@ -95,10 +117,12 @@ function createEmailService(config, httpClient = axios) {
 
     async function sendLifecycleEmail(store, cycle, template) {
         const message = template === 'A' ? buildTemplateA(cycle) : buildTemplateB(cycle);
+        const emailId = makeEmailId(template, cycle);
+        const legacyEmailId = makeLegacyEmailId(template, cycle);
         const relatedDate = template === 'A' ? cycle.latestLateCancellationAt : cycle.p57EligibleAt;
-        const emailId = makeEmailId(template, cycle, relatedDate);
 
-        if (await store.hasSentEmail(emailId)) {
+        // Check both stable and legacy IDs to prevent re-sends after the emailId format migration
+        if (await store.hasSentEmail(emailId) || await store.hasSentEmail(legacyEmailId)) {
             return { sent: false, skipped: true, emailId };
         }
 
@@ -173,6 +197,7 @@ module.exports = {
     getFirstName,
     isRemovalDateOnOrAfterEmailCutoff,
     makeEmailId,
+    makeLegacyEmailId,
     shouldSendTemplateA,
     shouldSendTemplateB
 };

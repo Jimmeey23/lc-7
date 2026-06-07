@@ -3,13 +3,16 @@ require('dotenv').config();
 const HOST_ID = 13752;
 const LC7_TAG_ID = 164561;
 const P57_TAG_ID = 164581;
+const MAX_AUTO_RETRIES = 5;
 const LIFECYCLE_STATUSES = {
     DETECTED: 'DETECTED',
     LC7_TAG_ASSIGNED: 'LC7_TAG_ASSIGNED',
     FUTURE_BOOKINGS_CANCELLED: 'FUTURE_BOOKINGS_CANCELLED',
     WAITING_7_DAYS: 'WAITING_7_DAYS',
     P57_TAG_ASSIGNED: 'P57_TAG_ASSIGNED',
-    FAILED: 'FAILED'
+    OVERRIDE: 'OVERRIDE',
+    FAILED: 'FAILED',
+    RETRY_PENDING: 'RETRY_PENDING'
 };
 
 function getConfig() {
@@ -32,7 +35,12 @@ function getConfig() {
         },
         dryRun: process.env.DRY_RUN === 'true',
         testMemberId: process.env.TEST_MEMBER_ID ? Number(process.env.TEST_MEMBER_ID) : null,
-        cronSchedule: process.env.CRON_SCHEDULE || '*/5 * * * *'
+        cronSchedule: process.env.CRON_SCHEDULE || '*/5 * * * *',
+        reportPollAttempts: Number(process.env.REPORT_POLL_ATTEMPTS) || 15,
+        reportPollIntervalMs: Number(process.env.REPORT_POLL_INTERVAL_MS) || 3000,
+        reportLookbackDays: Number(process.env.REPORT_LOOKBACK_DAYS) || 30,
+        momenceRateLimitMs: Number(process.env.MOMENCE_RATE_LIMIT_MS) || 200,
+        emailDedupMigratedAt: process.env.EMAIL_DEDUP_MIGRATED_AT || null
     };
 
     const missing = [];
@@ -58,6 +66,7 @@ function getConfig() {
 module.exports = {
     HOST_ID,
     LC7_TAG_ID,
+    MAX_AUTO_RETRIES,
     P57_TAG_ID,
     LIFECYCLE_STATUSES,
     getConfig

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { LIFECYCLE_STATUSES } = require('../src/config');
 const { formatIST, parseDate } = require('../src/date-utils');
 const {
+    buildAtRiskRows,
     buildP57TagPayload,
     findTriggeringMembers,
     findLatestTriggerAfter,
@@ -86,6 +87,90 @@ test('findTriggeringMembers uses the third cancellation date even when later can
     assert.equal(detections.length, 1);
     assert.equal(detections[0].latestLateCancellationAt, '22-05-2026 05:30:00');
     assert.equal(detections[0].p57EligibleAt, '29-05-2026 05:30:00');
+});
+
+test('findTriggeringMembers creates a new cycle for post-P57 repeat cancellation windows', () => {
+    const firstWindow = [
+        cancellation(100, '2026-05-19T00:00:00.000Z'),
+        cancellation(100, '2026-05-20T00:00:00.000Z'),
+        cancellation(100, '2026-05-22T00:00:00.000Z')
+    ];
+    const [completedCycle] = findTriggeringMembers(firstWindow, [], new Date('2026-05-25T00:00:00.000Z'));
+    completedCycle.status = LIFECYCLE_STATUSES.P57_TAG_ASSIGNED;
+    completedCycle.p57TagAssignedAt = '29-05-2026 05:30:01';
+
+    const detections = findTriggeringMembers([
+        ...firstWindow,
+        cancellation(100, '2026-05-30T00:00:00.000Z'),
+        cancellation(100, '2026-05-31T00:00:00.000Z'),
+        cancellation(100, '2026-06-02T00:00:00.000Z')
+    ], [completedCycle], new Date('2026-06-02T01:00:00.000Z'));
+
+    assert.equal(detections.length, 1);
+    assert.equal(detections[0].latestLateCancellationAt, '02-06-2026 05:30:00');
+    assert.notEqual(detections[0].cycleId, completedCycle.cycleId);
+});
+
+test('findTriggeringMembers starts fresh after override completion timestamp', () => {
+    const overrideCompletedCycle = {
+        cycleId: 'override-cycle',
+        memberId: 100,
+        latestLateCancellationAt: '03-06-2026 05:30:00',
+        p57TagAssignedAt: '04-06-2026 05:30:00',
+        status: LIFECYCLE_STATUSES.P57_TAG_ASSIGNED
+    };
+
+    const detections = findTriggeringMembers([
+        cancellation(100, '2026-06-02T00:00:00.000Z'),
+        cancellation(100, '2026-06-03T00:00:00.000Z'),
+        cancellation(100, '2026-06-05T00:00:00.000Z')
+    ], [overrideCompletedCycle], new Date('2026-06-05T01:00:00.000Z'));
+
+    assert.equal(detections.length, 0);
+});
+
+test('findTriggeringMembers counts late cancellations after an overridden cycle even if override is processed later', () => {
+    const overrideCompletedCycle = {
+        cycleId: 'override-cycle',
+        memberId: 100,
+        latestLateCancellationAt: '03-06-2026 05:30:00',
+        p57TagAssignedAt: '07-06-2026 14:30:00',
+        status: LIFECYCLE_STATUSES.P57_TAG_ASSIGNED,
+        assignmentReason: 'Manual OVERRIDE reset'
+    };
+
+    const detections = findTriggeringMembers([
+        cancellation(100, '2026-06-02T00:00:00.000Z'),
+        cancellation(100, '2026-06-03T00:00:00.000Z'),
+        cancellation(100, '2026-06-05T00:00:00.000Z'),
+        cancellation(100, '2026-06-06T00:00:00.000Z'),
+        cancellation(100, '2026-06-07T00:00:00.000Z')
+    ], [overrideCompletedCycle], new Date('2026-06-07T10:00:00.000Z'));
+
+    assert.equal(detections.length, 1);
+    assert.equal(detections[0].latestLateCancellationAt, '07-06-2026 05:30:00');
+});
+
+test('buildAtRiskRows counts only late cancellations after completed override boundary', () => {
+    const overrideCompletedCycle = {
+        cycleId: 'override-cycle',
+        memberId: 100,
+        latestLateCancellationAt: '03-06-2026 05:30:00',
+        p57TagAssignedAt: '07-06-2026 14:30:00',
+        status: LIFECYCLE_STATUSES.P57_TAG_ASSIGNED,
+        assignmentReason: 'Manual OVERRIDE reset'
+    };
+
+    const rows = buildAtRiskRows([
+        cancellation(100, '2026-06-02T00:00:00.000Z'),
+        cancellation(100, '2026-06-03T00:00:00.000Z'),
+        cancellation(100, '2026-06-05T00:00:00.000Z')
+    ], new Set(), new Date('2026-06-07T10:00:00.000Z'), [overrideCompletedCycle]);
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].memberId, 100);
+    assert.equal(rows[0].cancellationsInWindow, 1);
+    assert.equal(rows[0].latestCancellationAt, '05-06-2026 05:30:00');
 });
 
 test('findLatestTriggerAfter resets only after three newer cancellations in seven days', () => {
