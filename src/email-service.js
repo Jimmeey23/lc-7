@@ -57,35 +57,43 @@ function isRemovalDateOnOrAfterEmailCutoff(cycle) {
     return Boolean(date && date >= EMAIL_POLICY_CUTOFF_AT);
 }
 
+// Cycles created or ended from the dashboard with "don't email" carry this marker.
+const SILENT_MARKER = '[silent]';
+function isSilent(cycle) {
+    return String(cycle.assignmentReason || '').includes(SILENT_MARKER);
+}
+
 function shouldSendTemplateA(cycle) {
     // Never send Template A for backdated/silent assignments
     if (cycle.assignmentReason && cycle.assignmentReason.startsWith('Backdated')) return false;
+    if (isSilent(cycle)) return false;
     return Boolean(cycle.memberEmail && areAllTriggerDatesOnOrAfterEmailCutoff(cycle));
 }
 
 function shouldSendTemplateB(cycle) {
     // Never send Template B for expired-backdated cycles (penalty was never enforced)
     if (cycle.assignmentReason && cycle.assignmentReason.startsWith('Backdated') && !cycle.lc7TagAssignedAt) return false;
+    if (isSilent(cycle)) return false;
     return Boolean(cycle.memberEmail && isRemovalDateOnOrAfterEmailCutoff(cycle));
 }
 
-function buildTemplateA(cycle) {
+function buildTemplateA(cycle, mail = {}) {
     const firstName = getFirstName(cycle);
     return {
         subject: TEMPLATE_A_SUBJECT,
-        templateUuid: TEMPLATE_A_UUID,
+        templateUuid: mail.templateAUuid || TEMPLATE_A_UUID,
         templateVariables: {
             first_name: firstName,
-            your_name: MAIL_SIGNATURE_NAME
+            your_name: mail.signatureName || MAIL_SIGNATURE_NAME
         }
     };
 }
 
-function buildTemplateB(cycle) {
+function buildTemplateB(cycle, mail = {}) {
     const firstName = getFirstName(cycle);
     return {
         subject: TEMPLATE_B_SUBJECT,
-        templateUuid: TEMPLATE_B_UUID,
+        templateUuid: mail.templateBUuid || TEMPLATE_B_UUID,
         templateVariables: {
             first_name: firstName
         }
@@ -117,7 +125,7 @@ function createEmailService(config, httpClient = axios) {
     }
 
     async function sendLifecycleEmail(store, cycle, template) {
-        const message = template === 'A' ? buildTemplateA(cycle) : buildTemplateB(cycle);
+        const message = template === 'A' ? buildTemplateA(cycle, config.mail) : buildTemplateB(cycle, config.mail);
         const emailId = makeEmailId(template, cycle);
         const legacyEmailId = makeLegacyEmailId(template, cycle);
         const relatedDate = template === 'A' ? cycle.latestLateCancellationAt : cycle.p57EligibleAt;
@@ -186,6 +194,7 @@ function createEmailService(config, httpClient = axios) {
 }
 
 module.exports = {
+    SILENT_MARKER,
     EMAIL_POLICY_CUTOFF_AT,
     TEMPLATE_A_SUBJECT,
     TEMPLATE_B_SUBJECT,

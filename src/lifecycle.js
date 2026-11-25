@@ -298,14 +298,16 @@ function buildAtRiskRows(rawCancellations, activeMemberIds = new Set(), now = ne
     return rows.sort((a, b) => b.cancellationsInWindow - a.cancellationsInWindow);
 }
 
-function buildP57TagPayload(currentTags, memberId) {
+const DEFAULT_TAG_IDS = { lc7: LC7_TAG_ID, p57: P57_TAG_ID };
+
+function buildP57TagPayload(currentTags, memberId, ids = DEFAULT_TAG_IDS) {
     const tagIds = [];
     for (const tag of currentTags) {
         const tagId = Number(tag.id ?? tag.tagId ?? tag.tag?.id);
-        if (!tagId || tagId === LC7_TAG_ID || tagId === P57_TAG_ID) continue;
+        if (!tagId || tagId === ids.lc7 || tagId === ids.p57) continue;
         if (!tagIds.includes(tagId)) tagIds.push(tagId);
     }
-    tagIds.push(P57_TAG_ID);
+    tagIds.push(ids.p57);
     return {
         tagIds,
         type: 'customer',
@@ -313,14 +315,14 @@ function buildP57TagPayload(currentTags, memberId) {
     };
 }
 
-function buildLc7TagPayload(currentTags, memberId) {
+function buildLc7TagPayload(currentTags, memberId, ids = DEFAULT_TAG_IDS) {
     const tagIds = [];
     for (const tag of currentTags) {
         const tagId = Number(tag.id ?? tag.tagId ?? tag.tag?.id);
-        if (!tagId || tagId === LC7_TAG_ID || tagId === P57_TAG_ID) continue;
+        if (!tagId || tagId === ids.lc7 || tagId === ids.p57) continue;
         if (!tagIds.includes(tagId)) tagIds.push(tagId);
     }
-    tagIds.push(LC7_TAG_ID);
+    tagIds.push(ids.lc7);
     return {
         tagIds,
         type: 'customer',
@@ -328,8 +330,8 @@ function buildLc7TagPayload(currentTags, memberId) {
     };
 }
 
-function shouldTransitionToP57(cycle, currentTags, now = new Date()) {
-    const hasLc7 = currentTags.some(tag => Number(tag.id ?? tag.tagId ?? tag.tag?.id) === LC7_TAG_ID);
+function shouldTransitionToP57(cycle, currentTags, now = new Date(), ids = DEFAULT_TAG_IDS) {
+    const hasLc7 = currentTags.some(tag => Number(tag.id ?? tag.tagId ?? tag.tag?.id) === ids.lc7);
     if (!hasLc7) {
         return { shouldTransition: false, reason: 'LC-7 tag is not present' };
     }

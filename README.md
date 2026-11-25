@@ -73,29 +73,46 @@ Schedule locally:
 npm run schedule
 ```
 
+## Dashboard (LC-7 Control Room)
+
+The same Railway service serves a web app at its public URL (`/`).
+
+- **Overview**: counts (serving LC-7, at risk, blocked/restored this week, needs attention), recent runs and webhooks, live activity.
+- **Members**: everyone in a lifecycle, filterable and searchable. Open a member to see their timeline and:
+  - **End block & restore P57** now (optionally without emailing them),
+  - **change when the block ends**,
+  - **retry** a failed step.
+- **Block a member**: manually put a member on LC-7 (choose length, reason, whether to cancel future bookings and whether to email).
+- **At risk**, **Run history**, **Emails**: the AtRisk, RunLog and EmailLog tabs.
+- **Live activity**: the server log streamed in real time; **Run now** starts a run and you can watch it.
+- **Locations**: add, edit, pause or remove cities/studios; test their connection; copy their webhook URL.
+
+Dashboard actions use the same code as the automation and share its lock, so they never collide with a run or webhook.
+
+Sign-in: set `ADMIN_PASSWORD` (and optionally `SESSION_SECRET`) in Railway. Without `ADMIN_PASSWORD` the dashboard stays locked.
+
 ## Adding another city / location
 
-Each location runs as its own deployment with its own `.env`. No code changes needed.
+All locations run in this one service, with the same rules.
 
-1. Create a new, empty Google Sheet for the location (tabs are created automatically).
-2. In Momence, note the location's host ID and create/find its LC-7 and P57 tags.
-3. Create a new Railway service from this repo (or copy `.env` locally) and set:
+1. Create an empty Google Sheet for the location (same Google account; tabs are created automatically).
+2. In Momence, note the location's host ID and its LC-7 and P57 tag IDs.
+3. In the dashboard: **Locations → Add location**. Pick a short ID (e.g. `blr`) and a secrets prefix (e.g. `BLR_`). Tick **Dry run** for the first day.
+4. In Railway, add the location's secrets using the prefix:
 
    ```bash
-   LOCATION_NAME=bengaluru
-   MOMENCE_HOST_ID=<host id>
-   LC7_TAG_ID=<lc7 tag id>
-   P57_TAG_ID=<p57 tag id>
-   LC7_LIFECYCLE_SHEET_ID=<new sheet id>
-   MOMENCE_ACCESS_TOKEN=...
-   MOMENCE_ALL_COOKIES=...
-   MAIL_FROM=... / MAIL_REPLY_TO=... / MAILTRAP_TEMPLATE_A_UUID=... (optional)
+   BLR_MOMENCE_ACCESS_TOKEN=...
+   BLR_MOMENCE_ALL_COOKIES=...
+   BLR_MOMENCE_WEBHOOK_SECRET=...        # optional, enables real-time webhooks
+   BLR_MOMENCE_API_CLIENT_ID=... etc.    # optional, v2 API for webhooks/look-ups
+   BLR_MAILTRAP_API_TOKEN=...            # optional, defaults to the primary one
    ```
 
-4. First run with `DRY_RUN=true` (and optionally `TEST_MEMBER_ID`) and check the sheet.
-5. Set `DRY_RUN=false`.
+   Momence and webhook secrets never fall back to the primary location's values.
+5. Click **Test connection** on the location card, then point the location's Momence webhook to the URL shown on the card (`/webhooks/momence/<id>`).
+6. When the dry run looks right, edit the location and untick **Dry run**.
 
-Unset location variables fall back to the original defaults, so the existing deployment keeps working unchanged.
+Settings live in the `Locations` tab of the primary sheet; secrets stay in Railway. The primary location is still configured only by the env vars in `.env.example`.
 Sheet dates and the scheduler use IST (`Asia/Kolkata`); locations outside IST need code changes in `src/date-utils.js`.
 
 ## Reliability notes

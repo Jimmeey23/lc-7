@@ -28,27 +28,73 @@ const LIFECYCLE_STATUSES = {
     RETRY_PENDING: 'RETRY_PENDING'
 };
 
-function getConfig() {
+// Secrets that may differ per location. A location with envPrefix "BLR_" reads
+// BLR_MOMENCE_ACCESS_TOKEN etc. Momence and webhook secrets never fall back to the
+// default location's values (that would act on the wrong studio); shared accounts
+// (Google, Mailtrap) do.
+const LOCATION_SECRET_KEYS = [
+    { key: 'MOMENCE_ACCESS_TOKEN', required: true, fallback: false },
+    { key: 'MOMENCE_ALL_COOKIES', required: true, fallback: false },
+    { key: 'MOMENCE_WEBHOOK_SECRET', required: false, fallback: false },
+    { key: 'MOMENCE_API_CLIENT_ID', required: false, fallback: false },
+    { key: 'MOMENCE_API_CLIENT_SECRET', required: false, fallback: false },
+    { key: 'MOMENCE_API_USERNAME', required: false, fallback: false },
+    { key: 'MOMENCE_API_PASSWORD', required: false, fallback: false },
+    { key: 'MOMENCE_V2_ACCESS_TOKEN', required: false, fallback: false },
+    { key: 'MAILTRAP_API_TOKEN', required: true, fallback: true }
+];
+
+function locationEnv(prefix, key, fallback) {
+    if (!prefix) return process.env[key];
+    const own = process.env[`${prefix}${key}`];
+    if (own) return own;
+    return fallback ? process.env[key] : undefined;
+}
+
+function secretStatus(location = {}) {
+    const prefix = location.envPrefix || '';
+    return LOCATION_SECRET_KEYS.map(({ key, required, fallback }) => ({
+        name: `${prefix}${key}`,
+        required,
+        set: Boolean(locationEnv(prefix, key, fallback)),
+        inherited: Boolean(prefix && !process.env[`${prefix}${key}`] && fallback && process.env[key])
+    }));
+}
+
+function pick(value, fallback) {
+    return value === undefined || value === null || value === '' ? fallback : value;
+}
+
+// location: optional object from the Locations tab. Without it, the default
+// (env-only) location is returned exactly as before.
+function getConfig(location = null) {
+    const loc = location || {};
+    const prefix = loc.envPrefix || '';
+    const env = (key, fallback = false) => locationEnv(prefix, key, fallback);
     const config = {
-        locationName: LOCATION_NAME,
-        hostId: HOST_ID,
-        currency: MOMENCE_CURRENCY,
-        lc7TagId: LC7_TAG_ID,
-        p57TagId: P57_TAG_ID,
-        accessToken: process.env.MOMENCE_ACCESS_TOKEN,
-        allCookies: process.env.MOMENCE_ALL_COOKIES,
+        locationId: loc.id || 'default',
+        locationName: pick(loc.name, LOCATION_NAME),
+        hostId: Number(pick(loc.hostId, HOST_ID)),
+        currency: pick(loc.currency, MOMENCE_CURRENCY),
+        lc7TagId: Number(pick(loc.lc7TagId, LC7_TAG_ID)),
+        p57TagId: Number(pick(loc.p57TagId, P57_TAG_ID)),
+        accessToken: env('MOMENCE_ACCESS_TOKEN'),
+        allCookies: env('MOMENCE_ALL_COOKIES'),
         googleClientId: process.env.GOOGLE_CLIENT_ID,
         googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
         googleRefreshToken: process.env.GOOGLE_REFRESH_TOKEN,
-        sheetId: process.env.LC7_LIFECYCLE_SHEET_ID,
+        sheetId: pick(loc.sheetId, process.env.LC7_LIFECYCLE_SHEET_ID),
         mail: {
             apiUrl: process.env.MAILTRAP_API_URL || 'https://send.api.mailtrap.io/api/send',
-            apiToken: process.env.MAILTRAP_API_TOKEN,
-            from: process.env.MAIL_FROM || 'hello@physique57india.com',
-            fromName: process.env.MAIL_FROM_NAME || 'Mailtrap Test',
-            replyTo: process.env.MAIL_REPLY_TO || 'latecancellations@physique57india.com'
+            apiToken: env('MAILTRAP_API_TOKEN', true),
+            from: pick(loc.mailFrom, process.env.MAIL_FROM || 'hello@physique57india.com'),
+            fromName: pick(loc.mailFromName, process.env.MAIL_FROM_NAME || 'Mailtrap Test'),
+            replyTo: pick(loc.mailReplyTo, process.env.MAIL_REPLY_TO || 'latecancellations@physique57india.com'),
+            templateAUuid: loc.templateAUuid || '',
+            templateBUuid: loc.templateBUuid || '',
+            signatureName: loc.signatureName || ''
         },
-        dryRun: process.env.DRY_RUN === 'true',
+        dryRun: process.env.DRY_RUN === 'true' || String(loc.dryRun).toLowerCase() === 'true',
         testMemberId: process.env.TEST_MEMBER_ID ? Number(process.env.TEST_MEMBER_ID) : null,
         cronSchedule: process.env.CRON_SCHEDULE || '0 * * * *',
         reportPollAttempts: Number(process.env.REPORT_POLL_ATTEMPTS) || 40,
@@ -59,35 +105,37 @@ function getConfig() {
         // Momence public API v2 (used by the webhook flow). Either OAuth password-grant
         // credentials, or a ready access token. Falls back to MOMENCE_ACCESS_TOKEN.
         momenceV2: {
-            clientId: process.env.MOMENCE_API_CLIENT_ID || '',
-            clientSecret: process.env.MOMENCE_API_CLIENT_SECRET || '',
-            username: process.env.MOMENCE_API_USERNAME || '',
-            password: process.env.MOMENCE_API_PASSWORD || '',
-            staticToken: process.env.MOMENCE_V2_ACCESS_TOKEN || process.env.MOMENCE_ACCESS_TOKEN || ''
+            clientId: env('MOMENCE_API_CLIENT_ID') || '',
+            clientSecret: env('MOMENCE_API_CLIENT_SECRET') || '',
+            username: env('MOMENCE_API_USERNAME') || '',
+            password: env('MOMENCE_API_PASSWORD') || '',
+            staticToken: env('MOMENCE_V2_ACCESS_TOKEN') || env('MOMENCE_ACCESS_TOKEN') || ''
         },
         webhook: {
-            secret: process.env.MOMENCE_WEBHOOK_SECRET || '',
+            secret: env('MOMENCE_WEBHOOK_SECRET') || '',
             enforceSignature: process.env.MOMENCE_WEBHOOK_ENFORCE_SIGNATURE === 'true',
-            path: process.env.WEBHOOK_PATH || '/webhooks/momence',
+            path: loc.id && loc.id !== 'default'
+                ? `${process.env.WEBHOOK_PATH || '/webhooks/momence'}/${loc.id}`
+                : process.env.WEBHOOK_PATH || '/webhooks/momence',
             port: Number(process.env.PORT) || 3000
         }
     };
 
     const missing = [];
     for (const [key, value] of Object.entries({
-        MOMENCE_ACCESS_TOKEN: config.accessToken,
-        MOMENCE_ALL_COOKIES: config.allCookies,
+        [`${prefix}MOMENCE_ACCESS_TOKEN`]: config.accessToken,
+        [`${prefix}MOMENCE_ALL_COOKIES`]: config.allCookies,
         GOOGLE_CLIENT_ID: config.googleClientId,
         GOOGLE_CLIENT_SECRET: config.googleClientSecret,
         GOOGLE_REFRESH_TOKEN: config.googleRefreshToken,
-        LC7_LIFECYCLE_SHEET_ID: config.sheetId,
-        MAILTRAP_API_TOKEN: config.mail.apiToken
+        [prefix ? 'sheetId (location setting)' : 'LC7_LIFECYCLE_SHEET_ID']: config.sheetId,
+        [`${prefix}MAILTRAP_API_TOKEN`]: config.mail.apiToken
     })) {
         if (!value) missing.push(key);
     }
 
     if (missing.length > 0) {
-        throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+        throw new Error(`Missing required environment variables${prefix ? ` for location ${config.locationId}` : ''}: ${missing.join(', ')}`);
     }
 
     return config;
@@ -101,5 +149,7 @@ module.exports = {
     MAX_AUTO_RETRIES,
     P57_TAG_ID,
     LIFECYCLE_STATUSES,
-    getConfig
+    LOCATION_SECRET_KEYS,
+    getConfig,
+    secretStatus
 };

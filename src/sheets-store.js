@@ -498,7 +498,29 @@ async function createSheetsStore(config) {
         return rows.length;
     }
 
+    // Dashboard helpers. The store is long-lived there, so it must drop its per-run
+    // lifecycle cache before reading or writing fresh state.
+    function resetCache() {
+        lifecycleRowCache = null;
+    }
+
+    async function getRunLogRows() {
+        return (await runLogSheet.getRows()).map(row => rowToObject(row, RUN_LOG_HEADERS));
+    }
+
+    async function getAtRiskRows() {
+        return (await atRiskSheet.getRows()).map(row => rowToObject(row, AT_RISK_HEADERS));
+    }
+
+    async function getCompletedRows() {
+        return (await completedLC7Sheet.getRows()).map(row => rowToObject(row, COMPLETED_LC7_HEADERS));
+    }
+
     return {
+        resetCache,
+        getRunLogRows,
+        getAtRiskRows,
+        getCompletedRows,
         appendCompletedCycle,
         appendEmailLog,
         appendRunLog,

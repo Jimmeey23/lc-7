@@ -226,6 +226,7 @@ function createMomenceClient(config) {
     }
 
     return {
+        tagIds: { lc7: Number(config.lc7TagId), p57: Number(config.p57TagId) },
         assignLc7Tag,
         assignTags,
         cancelFutureBookings,

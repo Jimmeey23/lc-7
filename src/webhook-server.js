@@ -1,5 +1,6 @@
 const http = require('http');
 const { withLock } = require('./lock');
+const { withLogContext } = require('./log-bus');
 const { formatRunTimestamp } = require('./date-utils');
 const {
     buildWebhookRunLog,
@@ -47,7 +48,7 @@ function createWebhookQueue(deps) {
     }
 
     async function drain() {
-        await withLock(async () => {
+        await withLock(() => withLogContext({ location: deps.locationId || 'default', source: 'webhook' }, async () => {
             let context = null;
             while (queue.length > 0) {
                 const verified = queue.shift();
@@ -57,6 +58,7 @@ function createWebhookQueue(deps) {
                     const result = await processLateCancellation(verified, context);
                     console.log(`📨 Webhook member ${result.memberId} booking ${result.sessionBookingId}: ${result.outcome}`);
                     await context.store.appendRunLog(buildWebhookRunLog(verified, result, startedAt));
+                    if (deps.onProcessed) deps.onProcessed(result);
                 } catch (error) {
                     console.error(`💥 Webhook processing failed for booking ${verified.payload?.sessionBookingId}: ${error.stack || error.message}`);
                     try {
@@ -68,7 +70,7 @@ function createWebhookQueue(deps) {
                     context = null;
                 }
             }
-        });
+        }));
     }
 
     function kick() {

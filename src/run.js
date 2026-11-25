@@ -1,5 +1,10 @@
 const crypto = require('crypto');
 const { getConfig, LIFECYCLE_STATUSES, LC7_TAG_ID, P57_TAG_ID, MAX_AUTO_RETRIES } = require('./config');
+
+// Tag IDs of the location the Momence client belongs to (defaults for test doubles).
+function tagIdsOf(momence) {
+    return momence?.tagIds || { lc7: LC7_TAG_ID, p57: P57_TAG_ID };
+}
 const { formatIST, formatRunTimestamp, parseDate } = require('./date-utils');
 const {
     buildAtRiskRows,
@@ -268,12 +273,12 @@ async function transitionEligibleCycles(store, momence, cycles, now = new Date()
 
             const tags = await momence.fetchMemberTags(cycle.memberId);
             const tagIds = tags.map(tag => Number(tag.id ?? tag.tagId ?? tag.tag?.id)).filter(Boolean);
-            const hasLc7 = tagIds.includes(LC7_TAG_ID);
-            const hasP57 = tagIds.includes(P57_TAG_ID);
+            const hasLc7 = tagIds.includes(tagIdsOf(momence).lc7);
+            const hasP57 = tagIds.includes(tagIdsOf(momence).p57);
             const isEligibleForP57 = p57EligibleAt.getTime() <= now.getTime();
 
             if (isEligibleForP57) {
-                const payload = buildP57TagPayload(tags, cycle.memberId);
+                const payload = buildP57TagPayload(tags, cycle.memberId, tagIdsOf(momence));
                 const timestamp = formatRunTimestamp();
                 if (hasLc7 || !hasP57) {
                     await momence.assignTags(cycle.memberId, payload.tagIds);
@@ -297,7 +302,7 @@ async function transitionEligibleCycles(store, momence, cycles, now = new Date()
             }
 
             if (!hasLc7 || hasP57) {
-                const payload = buildLc7TagPayload(tags, cycle.memberId);
+                const payload = buildLc7TagPayload(tags, cycle.memberId, tagIdsOf(momence));
                 const timestamp = formatRunTimestamp();
                 await momence.assignTags(cycle.memberId, payload.tagIds);
                 await store.updateCycle(cycle.cycleId, {
@@ -330,9 +335,9 @@ async function processOverrideCycles(store, momence, cycles) {
         try {
             const tags = await momence.fetchMemberTags(cycle.memberId);
             const tagIds = tags.map(tag => Number(tag.id ?? tag.tagId ?? tag.tag?.id)).filter(Boolean);
-            const hasLc7 = tagIds.includes(LC7_TAG_ID);
-            const hasP57 = tagIds.includes(P57_TAG_ID);
-            const payload = buildP57TagPayload(tags, cycle.memberId);
+            const hasLc7 = tagIds.includes(tagIdsOf(momence).lc7);
+            const hasP57 = tagIds.includes(tagIdsOf(momence).p57);
+            const payload = buildP57TagPayload(tags, cycle.memberId, tagIdsOf(momence));
             const timestamp = formatRunTimestamp();
 
             if (hasLc7 || !hasP57) {
@@ -463,7 +468,7 @@ async function refreshCurrentLc7MembersSheet(store, momence, testMemberId = null
     return store.refreshActiveLC7(rows);
 }
 
-async function run() {
+async function run(configOverride = null) {
     const now = new Date();
     const startedAt = formatRunTimestamp();
     const runId = crypto.randomUUID();
@@ -489,9 +494,9 @@ async function run() {
     let store = null;
 
     try {
-        console.log(`🚀 LC-7 lifecycle run started ${runId}${process.env.LOCATION_NAME ? ` [${process.env.LOCATION_NAME}]` : ''}`);
+        const config = configOverride || getConfig();
+        console.log(`🚀 LC-7 lifecycle run started ${runId} [${config.locationName}]`);
         console.log('⚙️ Loading configuration...');
-        const config = getConfig();
         const momence = createMomenceClient(config);
         const emailService = createEmailService(config);
 
@@ -689,6 +694,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+    tagIdsOf,
     assignLc7ForNewCycles,
     cancelBookingsForAssignedCycles,
     filterTestMember,
