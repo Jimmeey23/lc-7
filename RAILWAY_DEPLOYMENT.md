@@ -1,6 +1,6 @@
 # Railway Deployment
 
-This project is configured as a Railway worker.
+This project runs as a Railway web service: hourly scheduler plus the Momence webhook receiver (see README "Real-time webhooks"). Generate a public domain for the service so Momence can reach `/webhooks/momence`.
 
 ## Start Command
 
@@ -36,7 +36,12 @@ MAILTRAP_API_TOKEN=
 MAIL_FROM=hello@physique57india.com
 MAIL_FROM_NAME=Mailtrap Test
 MAIL_REPLY_TO=latecancellations@physique57india.com
-CRON_SCHEDULE=*/5 * * * *
+CRON_SCHEDULE=0 * * * *
+MOMENCE_WEBHOOK_SECRET=
+MOMENCE_API_CLIENT_ID=
+MOMENCE_API_CLIENT_SECRET=
+MOMENCE_API_USERNAME=
+MOMENCE_API_PASSWORD=
 DRY_RUN=false
 ```
 

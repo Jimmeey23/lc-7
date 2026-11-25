@@ -1,1 +1,1 @@
-worker: node src/scheduler.js
+web: node src/scheduler.js

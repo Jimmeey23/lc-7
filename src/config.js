@@ -50,12 +50,27 @@ function getConfig() {
         },
         dryRun: process.env.DRY_RUN === 'true',
         testMemberId: process.env.TEST_MEMBER_ID ? Number(process.env.TEST_MEMBER_ID) : null,
-        cronSchedule: process.env.CRON_SCHEDULE || '*/15 * * * *',
+        cronSchedule: process.env.CRON_SCHEDULE || '0 * * * *',
         reportPollAttempts: Number(process.env.REPORT_POLL_ATTEMPTS) || 40,
         reportPollIntervalMs: Number(process.env.REPORT_POLL_INTERVAL_MS) || 3000,
         reportLookbackDays: Number(process.env.REPORT_LOOKBACK_DAYS) || 30,
         momenceRateLimitMs: Number(process.env.MOMENCE_RATE_LIMIT_MS) || 200,
-        emailDedupMigratedAt: process.env.EMAIL_DEDUP_MIGRATED_AT || null
+        emailDedupMigratedAt: process.env.EMAIL_DEDUP_MIGRATED_AT || null,
+        // Momence public API v2 (used by the webhook flow). Either OAuth password-grant
+        // credentials, or a ready access token. Falls back to MOMENCE_ACCESS_TOKEN.
+        momenceV2: {
+            clientId: process.env.MOMENCE_API_CLIENT_ID || '',
+            clientSecret: process.env.MOMENCE_API_CLIENT_SECRET || '',
+            username: process.env.MOMENCE_API_USERNAME || '',
+            password: process.env.MOMENCE_API_PASSWORD || '',
+            staticToken: process.env.MOMENCE_V2_ACCESS_TOKEN || process.env.MOMENCE_ACCESS_TOKEN || ''
+        },
+        webhook: {
+            secret: process.env.MOMENCE_WEBHOOK_SECRET || '',
+            enforceSignature: process.env.MOMENCE_WEBHOOK_ENFORCE_SIGNATURE === 'true',
+            path: process.env.WEBHOOK_PATH || '/webhooks/momence',
+            port: Number(process.env.PORT) || 3000
+        }
     };
 
     const missing = [];

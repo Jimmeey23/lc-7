@@ -355,6 +355,7 @@ module.exports = {
     getMemberId,
     getMostRecentLateCancellationDate,
     isLateCancellation,
+    isUnlimitedMembership,
     makeCycleId,
     makeRawCancellationId,
     shouldTransitionToP57

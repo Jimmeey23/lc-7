@@ -507,6 +507,7 @@ async function createSheetsStore(config) {
         getFailedEmailRows,
         getLifecycleRows,
         getMemberIdsWithAnyCycle,
+        getRawRows,
         getRetryableCycles,
         hasSentEmail,
         incrementRetryCount,

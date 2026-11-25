@@ -1,6 +1,13 @@
 const cron = require('node-cron');
 const { getConfig } = require('./config');
-const { run } = require('./run');
+const run_ = require('./run');
+const { run } = run_;
+const { withLock } = require('./lock');
+const { createEmailService } = require('./email-service');
+const { createMomenceClient } = require('./momence-client');
+const { createMomenceV2Client } = require('./momence-v2');
+const { createSheetsStore } = require('./sheets-store');
+const { createWebhookQueue, createWebhookServer } = require('./webhook-server');
 
 const config = getConfig();
 
@@ -16,7 +23,7 @@ const task = cron.schedule(config.cronSchedule, async () => {
         return;
     }
 
-    currentRun = run()
+    currentRun = withLock(() => run())
         .catch(error => {
             console.error(`Scheduled run failed: ${error.message}`);
         })
@@ -29,6 +36,28 @@ const task = cron.schedule(config.cronSchedule, async () => {
     timezone: 'Asia/Kolkata'
 });
 
+// Webhook receiver: real-time late-cancellation handling. Enabled when a secret is set.
+let server = null;
+let webhookQueue = null;
+if (config.webhook.secret) {
+    webhookQueue = createWebhookQueue({
+        createContext: async () => ({
+            config,
+            store: await createSheetsStore(config),
+            momence: createMomenceClient(config),
+            momenceV2: createMomenceV2Client(config),
+            emailService: createEmailService(config),
+            helpers: run_
+        })
+    });
+    server = createWebhookServer({ config, queue: webhookQueue, path: config.webhook.path });
+    server.listen(config.webhook.port, () => {
+        console.log(`Webhook receiver listening on :${config.webhook.port}${config.webhook.path}`);
+    });
+} else {
+    console.log('MOMENCE_WEBHOOK_SECRET not set; webhook receiver disabled (scheduled runs only)');
+}
+
 // Let an in-flight run finish before exiting so a member is never left half-processed
 // (e.g. LC-7 assigned but future bookings not yet cancelled). Railway sends SIGTERM on redeploy.
 const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS) || 5 * 60 * 1000;
@@ -38,13 +67,15 @@ async function shutdown(signal) {
     shuttingDown = true;
     console.log(`Scheduler received ${signal}; stopping`);
     task.stop();
-    if (currentRun) {
-        console.log('Waiting for active run to finish before exiting...');
+    if (server) server.close();
+    const pending = [currentRun, webhookQueue && webhookQueue.idle()].filter(Boolean);
+    if (pending.length > 0) {
+        console.log('Waiting for active run / queued webhooks to finish before exiting...');
         const timeout = new Promise(resolve => setTimeout(() => {
-            console.warn(`Active run did not finish within ${SHUTDOWN_TIMEOUT_MS}ms; exiting anyway`);
+            console.warn(`Active work did not finish within ${SHUTDOWN_TIMEOUT_MS}ms; exiting anyway`);
             resolve();
         }, SHUTDOWN_TIMEOUT_MS));
-        await Promise.race([currentRun, timeout]);
+        await Promise.race([Promise.all(pending), timeout]);
     }
     process.exit(0);
 }
