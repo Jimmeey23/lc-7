@@ -50,7 +50,7 @@ function getConfig() {
         },
         dryRun: process.env.DRY_RUN === 'true',
         testMemberId: process.env.TEST_MEMBER_ID ? Number(process.env.TEST_MEMBER_ID) : null,
-        cronSchedule: process.env.CRON_SCHEDULE || '*/5 * * * *',
+        cronSchedule: process.env.CRON_SCHEDULE || '*/15 * * * *',
         reportPollAttempts: Number(process.env.REPORT_POLL_ATTEMPTS) || 40,
         reportPollIntervalMs: Number(process.env.REPORT_POLL_INTERVAL_MS) || 3000,
         reportLookbackDays: Number(process.env.REPORT_LOOKBACK_DAYS) || 30,

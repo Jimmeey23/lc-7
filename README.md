@@ -101,6 +101,9 @@ Sheet dates and the scheduler use IST (`Asia/Kolkata`); locations outside IST ne
 ## Reliability notes
 
 - Lifecycle rows are read once per run and cached, keeping Google Sheets reads well under quota.
+- Raw-tab dedup reads only the `rawId` column.
+- `ActiveLC7` / `AtRisk` are rewritten only when content changes (`refreshedAt` = last changed).
+- Default schedule is every 15 minutes (`CRON_SCHEDULE` overrides).
 - Header migrations back up a tab before rewriting it.
 - Failed cycles count toward `MAX_AUTO_RETRIES`, then stop for manual review.
 - Momence `401`/`403` stops right away with a "refresh token/cookies" message.

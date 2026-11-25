@@ -262,8 +262,21 @@ async function createSheetsStore(config) {
         return (await rawSheet.getRows()).map(row => rowToObject(row, RAW_HEADERS));
     }
 
+    // Read only the rawId column (column A) for dedup instead of every column of every
+    // row. The raw tab grows forever, so this keeps each run's read small and fast.
+    async function getExistingRawIds() {
+        try {
+            const values = await rawSheet.getCellsInRange('A2:A');
+            return new Set((values || []).map(row => (row && row[0]) || '').filter(Boolean));
+        } catch (error) {
+            console.warn(`Raw ID column read failed, falling back to full read: ${error.message}`);
+            return new Set((await getRawRows()).map(row => row.rawId));
+        }
+    }
+
     async function insertRawRows(rawRows) {
-        const existing = new Set((await getRawRows()).map(row => row.rawId));
+        if (rawRows.length === 0) return 0;
+        const existing = await getExistingRawIds();
         const rowsToInsert = rawRows.filter(row => !existing.has(row.rawId));
         if (rowsToInsert.length > 0) await rawSheet.addRows(rowsToInsert);
         return rowsToInsert.length;
@@ -430,12 +443,28 @@ async function createSheetsStore(config) {
         });
     }
 
+    // Rewrite a dashboard tab only when its content changed. refreshedAt therefore
+    // means "last changed at". Header row is kept (ensureSheet validates it each run).
+    async function replaceDashboardRows(sheet, headers, newRows) {
+        const comparable = row => headers
+            .filter(header => header !== 'refreshedAt')
+            .map(header => String(row[header] ?? ''))
+            .join('\u0001');
+
+        const existingRows = (await sheet.getRows()).map(row => rowToObject(row, headers));
+        const unchanged = existingRows.length === newRows.length &&
+            existingRows.every((row, index) => comparable(row) === comparable(newRows[index]));
+        if (unchanged) return false;
+
+        await sheet.clearRows();
+        if (newRows.length > 0) await sheet.addRows(newRows);
+        return true;
+    }
+
     async function refreshActiveLC7(rows) {
-        await activeLC7Sheet.clear();
-        await activeLC7Sheet.setHeaderRow(ACTIVE_LC7_HEADERS);
-        if (rows.length === 0) return 0;
         const now = new Date();
-        await activeLC7Sheet.addRows(rows.map(row => {
+        const refreshedAt = formatRunTimestamp();
+        const newRows = rows.map(row => {
             const p57Date = parseDate(row.p57EligibleAt);
             const daysRemaining = p57Date
                 ? Math.max(0, Math.ceil((p57Date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
@@ -453,9 +482,10 @@ async function createSheetsStore(config) {
                 status: row.status || '',
                 assignmentReason: row.assignmentReason || '',
                 failureReason: row.lastError || '',
-                refreshedAt: formatRunTimestamp()
+                refreshedAt
             };
-        }));
+        });
+        await replaceDashboardRows(activeLC7Sheet, ACTIVE_LC7_HEADERS, newRows);
         return rows.length;
     }
 
@@ -463,11 +493,8 @@ async function createSheetsStore(config) {
     const refreshCurrentLc7Members = refreshActiveLC7;
 
     async function refreshAtRiskSheet(rows) {
-        await atRiskSheet.clear();
-        await atRiskSheet.setHeaderRow(AT_RISK_HEADERS);
-        if (rows.length === 0) return 0;
         const refreshedAt = formatRunTimestamp();
-        await atRiskSheet.addRows(rows.map(row => ({ ...row, refreshedAt })));
+        await replaceDashboardRows(atRiskSheet, AT_RISK_HEADERS, rows.map(row => ({ ...row, refreshedAt })));
         return rows.length;
     }
 
