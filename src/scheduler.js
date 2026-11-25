@@ -36,10 +36,12 @@ const task = cron.schedule(config.cronSchedule, async () => {
     timezone: 'Asia/Kolkata'
 });
 
-// Webhook receiver: real-time late-cancellation handling. Enabled when a secret is set.
+// Webhook receiver: real-time late-cancellation handling. The HTTP server always starts
+// (so /health and the public URL respond); webhooks are rejected with 503 until
+// MOMENCE_WEBHOOK_SECRET is set.
 let server = null;
 let webhookQueue = null;
-if (config.webhook.secret) {
+{
     webhookQueue = createWebhookQueue({
         createContext: async () => ({
             config,
@@ -53,9 +55,8 @@ if (config.webhook.secret) {
     server = createWebhookServer({ config, queue: webhookQueue, path: config.webhook.path });
     server.listen(config.webhook.port, () => {
         console.log(`Webhook receiver listening on :${config.webhook.port}${config.webhook.path}`);
+        if (!config.webhook.secret) console.log('MOMENCE_WEBHOOK_SECRET not set; webhooks will be rejected (503) until it is configured');
     });
-} else {
-    console.log('MOMENCE_WEBHOOK_SECRET not set; webhook receiver disabled (scheduled runs only)');
 }
 
 // Let an in-flight run finish before exiting so a member is never left half-processed

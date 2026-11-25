@@ -20,7 +20,7 @@ function safeEqual(a, b) {
 // Momence sends {"payload": "<JSON string>"}; the signature is an HMAC-SHA256 of that
 // string. Docs don't state the digest encoding, so hex and base64 are both accepted.
 function verifyWebhook({ headers, rawBody, secret, enforceSignature }) {
-    if (!secret) return { ok: false, status: 500, reason: 'MOMENCE_WEBHOOK_SECRET not configured' };
+    if (!secret) return { ok: false, status: 503, reason: 'MOMENCE_WEBHOOK_SECRET not configured' };
 
     let body;
     try {
