@@ -9,6 +9,13 @@ function getTagsFromResponse(data) {
     return [];
 }
 
+// Midnight today in IST (UTC+05:30), independent of the server's local timezone.
+function startOfTodayIST(now = new Date()) {
+    const IST_OFFSET_MS = 330 * 60 * 1000;
+    const shifted = new Date(now.getTime() + IST_OFFSET_MS);
+    return new Date(Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - IST_OFFSET_MS);
+}
+
 function createMomenceClient(config) {
     const headers = {
         Authorization: `Bearer ${config.accessToken}`,
@@ -38,6 +45,11 @@ function createMomenceClient(config) {
                 return await fn();
             } catch (error) {
                 const status = error.response?.status;
+                if (status === 401 || status === 403) {
+                    // Expired/invalid Momence token or cookies: retrying cannot help.
+                    error.message = `Momence auth rejected (${status}) — refresh MOMENCE_ACCESS_TOKEN / MOMENCE_ALL_COOKIES. ${error.message}`;
+                    throw error;
+                }
                 if (attempt >= retries || status === 404 || status === 400 || status === 422) {
                     throw error;
                 }
@@ -88,7 +100,7 @@ function createMomenceClient(config) {
 
     async function fetchLateCancellationReport(reportRunId) {
         const url = `https://api.momence.com/host/${config.hostId}/reports/late-cancellations/report-runs/${reportRunId}`;
-        const maxAttempts = config.reportPollAttempts || 15;
+        const maxAttempts = config.reportPollAttempts || 40;
         const intervalMs = config.reportPollIntervalMs || 3000;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -152,9 +164,17 @@ function createMomenceClient(config) {
                 customerHaveTag: 'have'
             }
         }));
-        const url = `https://api.momence.com/host/${config.hostId}/customers?filters=${filters}&query=&page=0&pageSize=200`;
-        const response = await requestWithRetry(() => api.get(url));
-        return response.data?.payload || [];
+        const pageSize = 200;
+        const maxPages = 50;
+        const members = [];
+        for (let page = 0; page < maxPages; page++) {
+            const url = `https://api.momence.com/host/${config.hostId}/customers?filters=${filters}&query=&page=${page}&pageSize=${pageSize}`;
+            const response = await requestWithRetry(() => api.get(url));
+            const batch = response.data?.payload || [];
+            members.push(...batch);
+            if (batch.length < pageSize) break;
+        }
+        return members;
     }
 
     async function cancelBooking(memberId, booking) {
@@ -164,7 +184,7 @@ function createMomenceClient(config) {
             memberId: Number(memberId),
             sessionId: booking.sessionId,
             refund: true,
-            currency: 'inr',
+            currency: config.currency || 'inr',
             disableNotifications: true,
             isLateCancellation: false,
             cancelMemberPaymentPlanInstallments: false
@@ -174,8 +194,7 @@ function createMomenceClient(config) {
     }
 
     async function cancelFutureBookings(memberId) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const today = startOfTodayIST();
         const history = await fetchMemberHistory(memberId);
         const futureBookings = history.filter(item =>
             item.type === 'session' &&
@@ -218,5 +237,6 @@ function createMomenceClient(config) {
 }
 
 module.exports = {
-    createMomenceClient
+    createMomenceClient,
+    startOfTodayIST
 };

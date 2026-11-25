@@ -203,10 +203,26 @@ async function ensureSheet(doc, title, headers) {
     if (headersMatchExactly(currentHeaders, headers)) return sheet;
 
     const rows = await sheet.getRows();
+    const migratedRows = rows.map(row => mapRowForHeaders(row, headers, title));
+
+    // Back up the tab before clearing so a failed rewrite (quota/network) cannot lose data.
+    let backup = null;
+    if (rows.length > 0) {
+        backup = await sheet.duplicate({ title: `${title}_backup_${Date.now()}` });
+    }
+
     await sheet.clear();
     await sheet.setHeaderRow(headers);
-    if (rows.length > 0) {
-        await sheet.addRows(rows.map(row => mapRowForHeaders(row, headers, title)));
+    if (migratedRows.length > 0) {
+        await sheet.addRows(migratedRows);
+    }
+
+    if (backup) {
+        try {
+            await backup.delete();
+        } catch (error) {
+            console.warn(`Header migration for ${title} succeeded but backup tab ${backup.title} could not be removed: ${error.message}`);
+        }
     }
     return sheet;
 }
@@ -253,8 +269,25 @@ async function createSheetsStore(config) {
         return rowsToInsert.length;
     }
 
+    // Lifecycle rows are loaded once per run (a store is created per run) and kept in
+    // sync locally on every insert/update. This avoids re-reading the whole sheet on
+    // every updateCycle call, which exhausted the Google Sheets read quota.
+    let lifecycleRowCache = null;
+
+    async function loadLifecycleSheetRows() {
+        if (!lifecycleRowCache) lifecycleRowCache = await lifecycleSheet.getRows();
+        return lifecycleRowCache;
+    }
+
+    async function findLifecycleRow(cycleId) {
+        const rows = await loadLifecycleSheetRows();
+        const row = rows.find(item => item.get('cycleId') === cycleId);
+        if (!row) throw new Error(`Lifecycle cycle not found: ${cycleId}`);
+        return row;
+    }
+
     async function getLifecycleRows() {
-        return (await lifecycleSheet.getRows()).map(row => rowToObject(row, LIFECYCLE_HEADERS));
+        return (await loadLifecycleSheetRows()).map(row => rowToObject(row, LIFECYCLE_HEADERS));
     }
 
     async function getMemberIdsWithAnyCycle() {
@@ -284,14 +317,19 @@ async function createSheetsStore(config) {
                 actionComment: cycle.actionComment || '',
                 updatedAt: formatRunTimestamp()
             }));
-        if (rows.length > 0) await lifecycleSheet.addRows(rows);
+        if (rows.length > 0) {
+            const added = await lifecycleSheet.addRows(rows);
+            if (lifecycleRowCache && Array.isArray(added) && added.length === rows.length) {
+                lifecycleRowCache.push(...added);
+            } else {
+                lifecycleRowCache = null;
+            }
+        }
         return rows.length;
     }
 
     async function updateCycle(cycleId, changes) {
-        const rows = await lifecycleSheet.getRows();
-        const row = rows.find(item => item.get('cycleId') === cycleId);
-        if (!row) throw new Error(`Lifecycle cycle not found: ${cycleId}`);
+        const row = await findLifecycleRow(cycleId);
         for (const [key, value] of Object.entries(changes)) row.set(key, value ?? '');
         row.set('updatedAt', formatRunTimestamp());
         await row.save();
@@ -310,9 +348,7 @@ async function createSheetsStore(config) {
     }
 
     async function incrementRetryCount(cycleId) {
-        const rows = await lifecycleSheet.getRows();
-        const row = rows.find(item => item.get('cycleId') === cycleId);
-        if (!row) throw new Error(`Lifecycle cycle not found: ${cycleId}`);
+        const row = await findLifecycleRow(cycleId);
         const current = Number(row.get('retryCount') || 0);
         row.set('retryCount', current + 1);
         row.set('updatedAt', formatRunTimestamp());

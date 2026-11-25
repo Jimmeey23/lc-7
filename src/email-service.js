@@ -6,8 +6,9 @@ const EMAIL_POLICY_CUTOFF_AT = new Date('2026-05-24T18:30:00.000Z');
 
 const TEMPLATE_A_SUBJECT = 'Booking Privileges Paused for 7 Days (Late Cancellations)';
 const TEMPLATE_B_SUBJECT = 'Notification: Your Booking Privileges Are Now Restored';
-const TEMPLATE_A_UUID = 'c608e180-2366-4035-9c41-f4a54ca54caf';
-const TEMPLATE_B_UUID = 'd5c9a2a0-2e55-48cf-9016-36f48330564b';
+const TEMPLATE_A_UUID = process.env.MAILTRAP_TEMPLATE_A_UUID || 'c608e180-2366-4035-9c41-f4a54ca54caf';
+const TEMPLATE_B_UUID = process.env.MAILTRAP_TEMPLATE_B_UUID || 'd5c9a2a0-2e55-48cf-9016-36f48330564b';
+const MAIL_SIGNATURE_NAME = process.env.MAIL_SIGNATURE_NAME || 'Team Physique 57';
 
 // Stable email ID — based only on immutable fields; unaffected by trigger date refreshes
 function makeEmailId(template, cycle) {
@@ -75,7 +76,7 @@ function buildTemplateA(cycle) {
         templateUuid: TEMPLATE_A_UUID,
         templateVariables: {
             first_name: firstName,
-            your_name: 'Team Physique 57'
+            your_name: MAIL_SIGNATURE_NAME
         }
     };
 }

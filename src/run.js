@@ -369,42 +369,55 @@ async function retryFailedCycles(store, momence) {
     let failedCount = 0;
     const failedMemberIds = [];
 
+    async function recordRetryFailure(cycle, retryCount, originalError) {
+        failedCount++;
+        failedMemberIds.push(String(cycle.memberId));
+        const newRetryCount = retryCount + 1;
+        await store.incrementRetryCount(cycle.cycleId);
+        if (newRetryCount >= MAX_AUTO_RETRIES) {
+            await store.updateCycle(cycle.cycleId, {
+                lastError: `Auto-retry exhausted (${MAX_AUTO_RETRIES} attempts). Manual intervention required. Original error: ${originalError}`
+            });
+        }
+    }
+
     for (const cycle of retryable) {
         const retryCount = Number(cycle.retryCount || 0);
-        const delayMs = Math.min(retryCount * 2000, 30000);
+        const delayMs = Math.min(retryCount * 2000, 10000);
         if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
 
         try {
             const lastError = cycle.lastError || '';
+            // The step helpers catch their own errors and mark the cycle FAILED, so a
+            // retry "fails" when they report failures — not only when they throw.
+            let stepFailures = 0;
             if (lastError.includes('LC-7 tag assignment failed')) {
-                const { assigned } = await assignLc7ForNewCycles(store, momence, [cycle]);
+                const { assigned, failedCount: tagFailures } = await assignLc7ForNewCycles(store, momence, [cycle]);
+                stepFailures += tagFailures;
                 if (assigned.length > 0) {
-                    await cancelBookingsForAssignedCycles(store, momence, assigned);
+                    stepFailures += (await cancelBookingsForAssignedCycles(store, momence, assigned)).failedCount;
                 }
             } else if (lastError.includes('Future booking cancellation failed')) {
                 // LC-7 was already assigned — only retry booking cancellation
-                await cancelBookingsForAssignedCycles(store, momence, [{ ...cycle, status: LIFECYCLE_STATUSES.LC7_TAG_ASSIGNED }]);
-            } else if (lastError.includes('P57 transition failed')) {
+                stepFailures += (await cancelBookingsForAssignedCycles(store, momence, [{ ...cycle, status: LIFECYCLE_STATUSES.LC7_TAG_ASSIGNED }])).failedCount;
+            } else if (lastError.includes('P57 transition failed') || lastError.includes('WAITING_7_DAYS reconciliation failed')) {
                 const now = new Date();
-                await transitionEligibleCycles(store, momence, [cycle], now);
+                stepFailures += (await transitionEligibleCycles(store, momence, [cycle], now)).failedCount;
             } else {
                 // Unknown error — retry from tag assignment
-                const { assigned } = await assignLc7ForNewCycles(store, momence, [cycle]);
+                const { assigned, failedCount: tagFailures } = await assignLc7ForNewCycles(store, momence, [cycle]);
+                stepFailures += tagFailures;
                 if (assigned.length > 0) {
-                    await cancelBookingsForAssignedCycles(store, momence, assigned);
+                    stepFailures += (await cancelBookingsForAssignedCycles(store, momence, assigned)).failedCount;
                 }
             }
+
             retriedCount++;
-        } catch (error) {
-            failedCount++;
-            failedMemberIds.push(String(cycle.memberId));
-            const newRetryCount = retryCount + 1;
-            await store.incrementRetryCount(cycle.cycleId);
-            if (newRetryCount >= MAX_AUTO_RETRIES) {
-                await store.updateCycle(cycle.cycleId, {
-                    lastError: `Auto-retry exhausted (${MAX_AUTO_RETRIES} attempts). Manual intervention required. Original error: ${cycle.lastError}`
-                });
+            if (stepFailures > 0) {
+                await recordRetryFailure(cycle, retryCount, cycle.lastError);
             }
+        } catch (error) {
+            await recordRetryFailure(cycle, retryCount, cycle.lastError || error.message);
         }
     }
 
@@ -467,7 +480,7 @@ async function run() {
     let store = null;
 
     try {
-        console.log(`🚀 LC-7 lifecycle run started ${runId}`);
+        console.log(`🚀 LC-7 lifecycle run started ${runId}${process.env.LOCATION_NAME ? ` [${process.env.LOCATION_NAME}]` : ''}`);
         console.log('⚙️ Loading configuration...');
         const config = getConfig();
         const momence = createMomenceClient(config);

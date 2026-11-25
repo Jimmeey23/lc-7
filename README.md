@@ -72,3 +72,36 @@ Schedule locally:
 ```bash
 npm run schedule
 ```
+
+## Adding another city / location
+
+Each location runs as its own deployment with its own `.env`. No code changes needed.
+
+1. Create a new, empty Google Sheet for the location (tabs are created automatically).
+2. In Momence, note the location's host ID and create/find its LC-7 and P57 tags.
+3. Create a new Railway service from this repo (or copy `.env` locally) and set:
+
+   ```bash
+   LOCATION_NAME=bengaluru
+   MOMENCE_HOST_ID=<host id>
+   LC7_TAG_ID=<lc7 tag id>
+   P57_TAG_ID=<p57 tag id>
+   LC7_LIFECYCLE_SHEET_ID=<new sheet id>
+   MOMENCE_ACCESS_TOKEN=...
+   MOMENCE_ALL_COOKIES=...
+   MAIL_FROM=... / MAIL_REPLY_TO=... / MAILTRAP_TEMPLATE_A_UUID=... (optional)
+   ```
+
+4. First run with `DRY_RUN=true` (and optionally `TEST_MEMBER_ID`) and check the sheet.
+5. Set `DRY_RUN=false`.
+
+Unset location variables fall back to the original defaults, so the existing deployment keeps working unchanged.
+Sheet dates and the scheduler use IST (`Asia/Kolkata`); locations outside IST need code changes in `src/date-utils.js`.
+
+## Reliability notes
+
+- Lifecycle rows are read once per run and cached, keeping Google Sheets reads well under quota.
+- Header migrations back up a tab before rewriting it.
+- Failed cycles count toward `MAX_AUTO_RETRIES`, then stop for manual review.
+- Momence `401`/`403` stops right away with a "refresh token/cookies" message.
+- On `SIGTERM` (redeploy), the scheduler waits for the active run to finish.
