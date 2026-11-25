@@ -239,6 +239,12 @@ test('the same cancellation stored by both webhook and report is counted once', 
         { memberId: 1, cancelledDate: '2026-11-25T10:00:00Z', sessionDate: '2026-11-25T11:00:00Z' },
         { memberId: 1, cancelledDate: '2026-11-25T10:00:20Z', sessionDate: '2026-11-25T11:00:00Z' }
     ]).length, 1);
+    // Three different classes cancelled within the same minute all count.
+    assert.equal(dedupeCancellations([
+        { memberId: 1, cancelledDate: '2026-11-25T19:08:25Z', sessionDate: '2026-11-26T01:00:00Z' },
+        { memberId: 1, cancelledDate: '2026-11-25T19:08:40Z', sessionDate: '2026-11-26T02:00:00Z' },
+        { memberId: 1, cancelledDate: '2026-11-25T19:08:55Z', sessionDate: '2026-11-26T03:00:00Z' }
+    ]).length, 3);
 });
 
 test('member already waiting gets the 7-day clock reset instead of a new cycle', async () => {

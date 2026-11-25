@@ -78,13 +78,34 @@ function cancelKey(record) {
 }
 
 // Same late cancellation can be stored twice (webhook row + hourly report row).
+// The class start time identifies a booking: two rows for one member with the same
+// session minute are the same cancellation. Cancel time is only used when a row has
+// no session time, because a member can late-cancel several classes within a minute.
 function dedupeCancellations(records) {
-    const seen = new Set();
-    const result = [];
+    const sessionKeys = new Set();
+    const withSession = [];
+    const withoutSession = [];
     for (const record of records) {
-        const keys = [sessionKey(record), cancelKey(record)].filter(Boolean);
-        if (keys.some(key => seen.has(key))) continue;
-        keys.forEach(key => seen.add(key));
+        const key = sessionKey(record);
+        if (!key) {
+            withoutSession.push(record);
+            continue;
+        }
+        if (sessionKeys.has(key)) continue;
+        sessionKeys.add(key);
+        withSession.push(record);
+    }
+    const cancelTimes = withSession.map(record => [getMemberId(record), parseDate(getCancellationDate(record) || record.cancelledDate)?.getTime()]);
+    const seenCancelKeys = new Set();
+    const result = [...withSession];
+    for (const record of withoutSession) {
+        const memberId = getMemberId(record);
+        const cancelledAt = parseDate(getCancellationDate(record) || record.cancelledDate)?.getTime();
+        const key = cancelKey(record);
+        if (key && seenCancelKeys.has(key)) continue;
+        // Session-less row matches a known booking cancelled within a few seconds.
+        if (cancelledAt && cancelTimes.some(([id, time]) => id === memberId && time && Math.abs(time - cancelledAt) <= 5000)) continue;
+        if (key) seenCancelKeys.add(key);
         result.push(record);
     }
     return result;
