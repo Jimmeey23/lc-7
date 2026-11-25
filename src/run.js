@@ -133,12 +133,21 @@ function getSentEmailIds(emailLogRows) {
     );
 }
 
+const MAX_EMAIL_ATTEMPTS = 5;
+
+// One retry per unsent email per run (the latest FAILED row), and none once it has
+// failed MAX_EMAIL_ATTEMPTS times. Retrying every FAILED row made each run append a
+// new FAILED row per existing one, doubling the EmailLog tab every run.
 function getPendingFailedEmailRows(emailLogRows) {
     const sentEmailIds = getSentEmailIds(emailLogRows);
-    return emailLogRows.filter(row =>
-        row.status === 'FAILED' &&
-        !sentEmailIds.has(row.emailId)
-    );
+    const latestFailure = new Map();
+    const failureCount = new Map();
+    for (const row of emailLogRows) {
+        if (row.status !== 'FAILED' || !row.emailId || sentEmailIds.has(row.emailId)) continue;
+        latestFailure.set(row.emailId, row);
+        failureCount.set(row.emailId, (failureCount.get(row.emailId) || 0) + 1);
+    }
+    return [...latestFailure.values()].filter(row => failureCount.get(row.emailId) < MAX_EMAIL_ATTEMPTS);
 }
 
 async function createCachedEmailStore(store, emailLogRows = null) {
@@ -688,6 +697,7 @@ module.exports = {
     refreshCurrentLc7MembersSheet,
     refreshWaitingCycleTriggerDates,
     retryFailedCycles,
+    getPendingFailedEmailRows,
     retryFailedLifecycleEmails,
     run,
     sendLifecycleEmails,

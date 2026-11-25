@@ -61,3 +61,15 @@ test('startOfTodayIST returns IST midnight regardless of server timezone', () =>
     // 2026-05-27 10:00 UTC == 15:30 IST same day
     assert.equal(startOfTodayIST(new Date('2026-05-27T10:00:00Z')).toISOString(), '2026-05-26T18:30:00.000Z');
 });
+
+test('failed emails are retried once per email per run and capped', () => {
+    const { getPendingFailedEmailRows } = require('../src/run');
+    const failed = (id, n) => Array.from({ length: n }, () => ({ emailId: id, status: 'FAILED' }));
+    const rows = [
+        ...failed('a', 3),
+        ...failed('b', 5),
+        ...failed('c', 2), { emailId: 'c', status: 'SENT' }
+    ];
+    const pending = getPendingFailedEmailRows(rows);
+    assert.deepEqual(pending.map(row => row.emailId), ['a']);
+});
