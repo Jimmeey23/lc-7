@@ -10,6 +10,8 @@ function extractMembershipName(booking) {
 
     const direct = [
         booking.membershipName,
+        booking.boughtMembershipName,
+        booking.paidWithMembershipName,
         booking.boughtMembership?.membership?.name,
         booking.boughtMembership?.name,
         booking.membership?.name,

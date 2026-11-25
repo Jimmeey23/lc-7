@@ -119,7 +119,9 @@ Momence ── POST session-booking-cancelled ──▶ /webhooks/momence
   2. Ignore unless isLateCancellation = true; drop repeated x-webhook-reqeuest-id
   3. memberId = targetMemberId -> GET /api/v2/host/members/{id} (name, email)
   4. GET /api/v2/host/members/{id}/sessions?includeCancelled=true -> booking matching sessionBookingId
-  5. Membership used = membership on that booking; if Momence doesn't include it,
+  5. Membership used = membership on the matching booking in the private customer
+     history (readonly-api .../customers/{id}/history, matched by bookingId, then
+     sessionId); else membership on the v2 booking; else
      fall back to the late-cancellation report for that member; if still unknown,
      store the row and let the hourly run decide
   6. Save to LateCancellationsRaw (comment says "webhook")

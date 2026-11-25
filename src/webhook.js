@@ -103,6 +103,16 @@ function rawRowToRecord(row) {
     };
 }
 
+// Private Momence customer history (readonly-api .../customers/{id}/history). Items of
+// type 'session' carry bookingId/sessionId and the membership used to pay.
+function findHistoryBooking(history, sessionBookingId, sessionId) {
+    const items = Array.isArray(history) ? history : (history?.payload || history?.items || []);
+    const sessions = items.filter(item => !item?.type || item.type === 'session');
+    return sessions.find(item => sessionBookingId && Number(item.bookingId ?? item.sessionBookingId ?? item.id) === Number(sessionBookingId)) ||
+        sessions.find(item => sessionId && Number(item.sessionId ?? item.session?.id) === Number(sessionId)) ||
+        null;
+}
+
 async function findMembershipInReport(momence, memberId, cancelledAt, sessionStartsAt) {
     const records = await momence.fetchLateCancellations(14);
     const cancelTime = parseDate(cancelledAt)?.getTime();
@@ -145,12 +155,23 @@ async function processLateCancellation(verified, deps, now = new Date()) {
         console.warn(`Webhook: bookings lookup for member ${memberId} failed: ${error.response?.status || error.message}`);
     }
 
-    // 3. Membership used for that booking (booking first, report as fallback)
-    let membershipName = extractMembershipName(booking);
-    let membershipSource = membershipName ? 'session-bookings' : '';
+    // 3. Membership used for that booking: private customer history first, then the
+    //    v2 booking object, then the late-cancellation report.
+    let historyItem = null;
+    try {
+        historyItem = findHistoryBooking(await momence.fetchMemberHistory(memberId), payload.sessionBookingId, payload.sessionId);
+    } catch (error) {
+        console.warn(`Webhook: history lookup for member ${memberId} failed: ${error.response?.status || error.message}`);
+    }
+    let membershipName = extractMembershipName(historyItem);
+    let membershipSource = membershipName ? 'customer-history' : '';
+    if (!membershipName) {
+        membershipName = extractMembershipName(booking);
+        if (membershipName) membershipSource = 'session-bookings';
+    }
     if (!membershipName) {
         try {
-            membershipName = await findMembershipInReport(momence, memberId, payload.cancelledAt, booking?.session?.startsAt);
+            membershipName = await findMembershipInReport(momence, memberId, payload.cancelledAt, booking?.session?.startsAt || historyItem?.startsAt);
             if (membershipName) membershipSource = 'late-cancellation-report';
         } catch (error) {
             console.warn(`Webhook: report fallback for member ${memberId} failed: ${error.response?.status || error.message}`);
@@ -161,9 +182,9 @@ async function processLateCancellation(verified, deps, now = new Date()) {
         memberId,
         customerName: [member?.firstName, member?.lastName].filter(Boolean).join(' '),
         customerEmail: member?.email || '',
-        cancelledEvent: booking?.session?.name || '',
+        cancelledEvent: booking?.session?.name || historyItem?.sessionName || historyItem?.name || historyItem?.title || '',
         cancelledDate: payload.cancelledAt,
-        sessionDate: booking?.session?.startsAt || '',
+        sessionDate: booking?.session?.startsAt || historyItem?.startsAt || '',
         membershipName,
         bookingId: payload.sessionBookingId
     };
@@ -252,6 +273,7 @@ function buildWebhookRunLog(verified, result, startedAt, error = null) {
 module.exports = {
     buildWebhookRunLog,
     dedupeCancellations,
+    findHistoryBooking,
     isLateCancellationEvent,
     processLateCancellation,
     rawRowToRecord,

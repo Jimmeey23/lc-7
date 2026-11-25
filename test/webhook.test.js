@@ -86,7 +86,7 @@ function makeStore(rawRows = [], lifecycle = []) {
     };
 }
 
-function makeDeps(store, { booking, member, reportRecords = [] } = {}) {
+function makeDeps(store, { booking, member, reportRecords = [], history = [] } = {}) {
     const calls = { assignLc7Tag: [], cancelFutureBookings: [], report: 0, mail: [] };
     const momence = {
         assignLc7Tag: async memberId => calls.assignLc7Tag.push(memberId),
@@ -94,6 +94,7 @@ function makeDeps(store, { booking, member, reportRecords = [] } = {}) {
             calls.cancelFutureBookings.push(memberId);
             return { total: 1, successful: 1, failed: [], bookingIds: [1] };
         },
+        fetchMemberHistory: async () => history,
         fetchLateCancellations: async () => {
             calls.report++;
             return reportRecords;
@@ -296,4 +297,19 @@ test('HTTP server: ignores non-late events, queues late ones once, rejects bad s
     } finally {
         server.close();
     }
+});
+
+test('membership comes from private customer history before session bookings', async () => {
+    const store = makeStore();
+    const { deps } = makeDeps(store, {
+        booking: { id: 900, session: { name: 'Barre', startsAt: '2026-11-25T11:00:00Z' } },
+        history: [
+            { type: 'session', bookingId: 899, sessionId: 49, boughtMembership: { membership: { name: '10 Class Pack' } } },
+            { type: 'session', bookingId: 900, sessionId: 50, startsAt: '2026-11-25T11:00:00Z', boughtMembership: { membership: { name: 'Studio Unlimited' } } }
+        ]
+    });
+    const result = await processLateCancellation(verifiedLate(), deps, new Date('2026-11-25T12:00:00Z'));
+    assert.notEqual(result.outcome, 'MEMBERSHIP_UNKNOWN_DEFERRED_TO_SCHEDULED_RUN');
+    assert.notEqual(result.outcome, 'NOT_UNLIMITED_MEMBERSHIP');
+    assert.match(store.rawRows.at(-1).comment, /Studio Unlimited via customer-history/);
 });
